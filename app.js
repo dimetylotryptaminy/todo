@@ -1,7 +1,7 @@
 import { CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v23";
+const APP_VERSION = "v24";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -548,11 +548,15 @@ if (IOS && !SR) {
   function ensureRecog() {
     if (recog) return recog;
     const r = recog = new SR();
-    r.lang = "pl-PL"; r.interimResults = true; r.continuous = true; r.maxAlternatives = 1;
-    r.onstart = () => { active = true; sessionReady = true; dbg("start"); };
+    // iPhone: tryb ciągły w Safari oddaje tekst tylko przy pierwszym nagraniu (kolejne: start, cisza, „aborted”).
+    // Tryb jednej wypowiedzi działa za każdym razem — a i tak zapisujemy jedno zadanie na stuknięcie.
+    r.lang = "pl-PL"; r.interimResults = true; r.continuous = !IOS; r.maxAlternatives = 1;
+    r.onstart = () => { active = true; sessionReady = true; dbg("start (ciągły: " + r.continuous + ")"); };
+    r.onspeechstart = () => dbg("speechstart");
+    r.onnomatch = () => dbg("nomatch");
     r.onaudiostart = () => { dbg("audiostart"); if (listening) armWatchdog(); };
     r.onresult = (e) => {
-      if (!listening || !sessionReady) return;   // wyniki poprzedniego nagrywania ignorujemy
+      if (!listening || !sessionReady) { dbg("result pominięty (listening=" + listening + ", ready=" + sessionReady + ")"); return; }
       heard = true; bumpIdle();
       const full = Array.from(e.results).map((x) => x[0].transcript.trim()).join(" ").replace(/\s+/g, " ");
       dbg("result " + (e.results[e.results.length - 1].isFinal ? "F" : "i") + " #" + e.results.length + ": " + full.slice(-60));
