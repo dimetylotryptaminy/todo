@@ -318,7 +318,7 @@ function keyboardDictation(msg) {
   const cmd = $("cmd");
   cmd.focus();
   dictating = true;
-  note(msg || "Stuknij 🎤 na klawiaturze (na dole po prawej), powiedz polecenie, potem „Idź”.");
+  note(msg || "Stuknij 🎤 na klawiaturze i mów, np. „dodaj Genomtec wysłać umowę koniec”. Po słowie „koniec” zadanie zapisze się samo.");
 }
 $("cmd").addEventListener("blur", () => { dictating = false; });
 
@@ -400,6 +400,17 @@ if (IOS || !SR) {
     try { startRec(); } catch { stopListening(); keyboardDictation(); }
   });
 }
+
+// „koniec” wpisane lub podyktowane z klawiatury (np. dyktowanie na iPhonie) wykonuje polecenie bez wciskania „Idź”.
+$("cmd").addEventListener("input", () => {
+  const el = $("cmd");
+  const m = el.value.match(/^(.*?)(?:^|\s)koniec[\s.,!?]*/i);
+  if (!m) return;
+  const cmdText = m[1].trim();
+  const rest = el.value.slice(m[0].length);
+  el.value = rest;
+  if (cmdText) run(cmdText);
+});
 
 // iPhone: gdy otwiera się klawiatura, pasek poleceń przesuwa się nad nią.
 if (window.visualViewport) {
