@@ -1,7 +1,20 @@
 import { CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v21";
+const APP_VERSION = "v22";
+// Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
+// Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
+function trailingEndWord(text) {
+  const words = []; const re = /[^\s.,!?;:]+/g; let t;
+  while ((t = re.exec(text))) words.push({ i: t.index, n: norm(t[0]) });
+  if (!words.length) return -1;
+  const last = words[words.length - 1], prev = words[words.length - 2];
+  const isEnd = (x) => ["zapisz", "zapisze", "zapiszcie", "koniec", "koniecz", "koniecc"].includes(x) ||
+    (x.length >= 6 && x.length <= 7 && x.startsWith("konie") && x !== "koniem");
+  if (isEnd(last.n)) return last.i;
+  if (prev && isEnd(prev.n + last.n)) return prev.i;
+  return -1;
+}
 // Podgląd zdarzeń mikrofonu: otwórz adres z „?debug”, np. …/todo/?debug
 const DEBUG = /[?&]debug/.test(location.search);
 const dbgLines = [];
@@ -414,7 +427,7 @@ function keyboardDictation(msg) {
   const cmd = $("cmd");
   cmd.focus();
   dictating = true;
-  note(msg || "Stuknij 🎤 na klawiaturze i mów, np. „dodaj Genomtec wysłać umowę koniec”. Po słowie „koniec” zadanie zapisze się samo.");
+  note(msg || "Stuknij 🎤 na klawiaturze i mów, np. „dodaj Genomtec wysłać umowę zapisz”. Po słowie „zapisz” zadanie zapisze się samo.");
 }
 $("cmd").addEventListener("blur", () => { dictating = false; });
 
@@ -427,13 +440,13 @@ if (IOS && !SR) {
   label.innerHTML = mic.innerHTML;
   mic.replaceWith(label);
   $("cmd").addEventListener("focus", () => {
-    note("Stuknij 🎤 na klawiaturze i mów, np. „dodaj Genomtec wysłać umowę koniec”. Po słowie „koniec” zadanie zapisze się samo.");
+    note("Stuknij 🎤 na klawiaturze i mów, np. „dodaj Genomtec wysłać umowę zapisz”. Po słowie „zapisz” zadanie zapisze się samo.");
   });
 } else if (!SR) {
   mic.addEventListener("click", () => keyboardDictation("Ta przeglądarka nie rozpoznaje mowy. Użyj dyktowania systemowego (na Macu: dwa razy Fn)."));
 } else {
   // Tryb dyktowania. Dwa wejścia:
-  //  • mikrofon na dole — polecenia: „dodaj Genomtec wysłać umowę koniec”,
+  //  • mikrofon na dole — polecenia: „dodaj Genomtec wysłać umowę zapisz”,
   //  • mikrofon w rogu pola spółki — samo zadanie: „wysłać umowę koniec” trafia prosto do tego pola.
   // Po „koniec” zadanie się zapisuje, a mikrofon słucha dalej, aż klikniesz go ponownie (albo powiesz „stop”).
   let rec = null, listening = false, buffer = "", heard = false, watchdog = null, idle = null;
@@ -469,11 +482,12 @@ if (IOS && !SR) {
   }
 
   function stopListening(msg) {
-    listening = false; clearTimeout(watchdog); clearTimeout(idle); clearTimeout(restartTimer);
+    listening = false; clearTimeout(watchdog); clearTimeout(idle); clearTimeout(restartTimer); clearTimeout(endTimer);
     if (rec) { try { rec.stop(); } catch {} }
     if (activeBtn) { activeBtn.classList.remove("on"); activeBtn.setAttribute("aria-label", activeBtn === mic ? "Włącz mikrofon" : "Dyktuj zadanie do " + targetCat); }
     clearTargets();
-    const left = buffer.trim();
+    let left = buffer.trim();
+    const cutL = trailingEndWord(left); if (cutL >= 0) left = left.slice(0, cutL).trim();
     if (left && targetCat) { addToTarget(left); field().value = ""; }       // w polu spółki zapisujemy też to, co bez „koniec”
     else if (left) note("Mikrofon wyłączony. Niezapisany tekst jest w polu — dokończ i wciśnij Enter.", true);
     else if (msg) note(msg);
@@ -497,36 +511,27 @@ if (IOS && !SR) {
   // Nie polegamy na „isFinal”: Safari na iPhonie potrafi nigdy nie oznaczyć wyniku jako ostatecznego.
   let consumed = 0, lastFull = "", restartTimer = null; // restartTimer: zostawiony dla zgodności
 
-  // „koniec” rozpoznane z tolerancją na błędy rozpoznawania mowy („Koniec.”, „końca”, „konieć”, „konie c”…).
-  function findEnd(text) {
-    const re = /[^\s.,!?;:]+/g; let t;
-    const words = [];
-    while ((t = re.exec(text))) words.push({ w: t[0], i: t.index, n: norm(t[0]) });
-    for (let k = 0; k < words.length; k++) {
-      const n = words[k].n;
-      const two = k + 1 < words.length ? n + words[k + 1].n : "";
-      const hit = (x) => x === "koniec" || x === "koniecz" || x === "koniecc" || (x.length >= 6 && x.length <= 7 && x.startsWith("konie") && x !== "koniem");
-      if (hit(n)) { const end = words[k].i + words[k].w.length; return { index: words[k].i, 0: text.slice(words[k].i, end + (text.slice(end).match(/^[\s.,!?;:]*/)[0].length)) }; }
-      if (two && two === "koniec") { const w2 = words[k + 1]; return { index: words[k].i, 0: text.slice(words[k].i, w2.i + w2.w.length) }; }
-    }
-    return null;
-  }
-
-  function onTranscript(full) {
+  // Słowo zapisujące: „zapisz” (działa też dawne „koniec”). Liczy się tylko jako OSTATNIE słowo wypowiedzi
+  // i dopiero po krótkiej pauzie — dzięki temu „zapisz się na szkolenie” nie urwie zadania w połowie.
+  let endTimer = null;
+  function onTranscript(full, isFinal) {
     lastFull = full;
-    let pendingText = full.slice(consumed);
+    clearTimeout(endTimer);
+    const pendingText = full.slice(consumed);
     if (CANCEL.test(pendingText)) { consumed = full.length; buffer = ""; stopListening("Anulowano."); return; }
-    const m = findEnd(pendingText);
-    if (m) {
-      // „koniec” = zapisz i wyłącz mikrofon (jedno stuknięcie, jedno zadanie)
-      const text = pendingText.slice(0, m.index).trim();
-      consumed = full.length; buffer = "";
-      if (text) commit(text); else note("Nic nie zapisano — nie usłyszałem treści zadania.", true);
-      stopListening();
-      return;
-    }
     buffer = pendingText.trim();
     if (STOP.test(buffer)) { consumed = full.length; buffer = ""; stopListening("Mikrofon wyłączony."); return; }
+    const cut = trailingEndWord(buffer);
+    if (cut >= 0) {
+      const finish = () => {
+        if (!listening) return;
+        const text = buffer.slice(0, cut).trim();
+        consumed = full.length; buffer = "";
+        if (text) commit(text); else note("Nic nie zapisano — nie usłyszałem treści zadania.", true);
+        stopListening();
+      };
+      if (isFinal) finish(); else endTimer = setTimeout(finish, 800);
+    }
     if (listening) show();
   }
 
@@ -541,7 +546,7 @@ if (IOS && !SR) {
       heard = true; bumpIdle();
       const full = Array.from(e.results).map((x) => x[0].transcript.trim()).join(" ").replace(/\s+/g, " ");
       dbg("result " + (e.results[e.results.length - 1].isFinal ? "F" : "i") + " #" + e.results.length + ": " + full.slice(-60));
-      onTranscript(full);
+      onTranscript(full, e.results[e.results.length - 1].isFinal);
     };
     r.onerror = (e) => {
       dbg("error " + e.error);
@@ -563,7 +568,9 @@ if (IOS && !SR) {
     r.onend = () => {
       dbg("end");
       if (r !== rec || !listening) return;
-      const left = buffer.trim(); buffer = "";
+      clearTimeout(endTimer);
+      let left = buffer.trim(); buffer = "";
+      const cut = trailingEndWord(left); if (cut >= 0) left = left.slice(0, cut).trim();
       if (left) commit(left);
       stopListening(left ? "" : "Mikrofon wyłączony.");
     };
@@ -584,15 +591,15 @@ if (IOS && !SR) {
       targetCat = cat; activeBtn = btn;
       btn.classList.add("on"); btn.setAttribute("aria-label", "Wyłącz mikrofon");
       setTarget(""); bumpIdle();
-      note(cat ? `Teraz mów zadanie do ${cat}, na końcu „koniec”.` : "Teraz mów polecenie, np. „dodaj Genomtec … koniec”.");
+      note(cat ? `Teraz mów zadanie do ${cat}, na końcu „zapisz”.` : "Teraz mów polecenie, np. „dodaj Genomtec … zapisz”.");
       return;
     }
     listening = true; buffer = ""; heard = false; targetCat = cat; activeBtn = btn;
     btn.classList.add("on"); btn.setAttribute("aria-label", "Wyłącz mikrofon");
     setTarget("");
     note(cat
-      ? `Słucham… Mów zadanie do ${cat}, na końcu powiedz „koniec”.`
-      : "Słucham… Powiedz np. „dodaj Genomtec wysłać umowę koniec”.");
+      ? `Słucham… Mów zadanie do ${cat}, na końcu powiedz „zapisz”.`
+      : "Słucham… Powiedz np. „dodaj Genomtec wysłać umowę zapisz”.");
     bumpIdle();
     // Licznik „nic nie słyszę” rusza dopiero, gdy mikrofon naprawdę nagrywa (nie w trakcie pytania o zgodę).
     const armWatchdog = () => watchdog = setTimeout(() => {
@@ -610,15 +617,20 @@ if (IOS && !SR) {
   });
 }
 
-// „koniec” wpisane lub podyktowane z klawiatury (np. dyktowanie na iPhonie) wykonuje polecenie bez wciskania „Idź”.
+// „zapisz” wpisane lub podyktowane z klawiatury (np. dyktowanie na iPhonie) jako ostatnie słowo, po krótkiej pauzie,
+// wykonuje polecenie bez wciskania „Idź”.
+let kbEnd = null;
 $("cmd").addEventListener("input", () => {
+  clearTimeout(kbEnd);
   const el = $("cmd");
-  const m = el.value.match(/^(.*?)(?:^|\s)koniec[\s.,!?]*/i);
-  if (!m) return;
-  const cmdText = m[1].trim();
-  const rest = el.value.slice(m[0].length);
-  el.value = rest;
-  if (cmdText) run(cmdText);
+  const cut = trailingEndWord(el.value);
+  if (cut < 0) return;
+  kbEnd = setTimeout(() => {
+    const c = trailingEndWord(el.value); if (c < 0) return;
+    const cmdText = el.value.slice(0, c).trim();
+    el.value = "";
+    if (cmdText) run(cmdText);
+  }, 900);
 });
 
 // iPhone: gdy otwiera się klawiatura, pasek poleceń ma stać tuż nad nią (mierzymy, o ile ją zasłania, i tylko tyle przesuwamy).
@@ -638,9 +650,21 @@ if (window.visualViewport) {
 let kTimer = null;
 $("cmd").addEventListener("focus", () => {
   clearInterval(kTimer);
-  kTimer = setInterval(() => { if (/(^|\s)koniec/i.test($("cmd").value)) $("cmd").dispatchEvent(new Event("input")); }, 500);
+  let lastSeen = "";
+  // Gdy dyktowanie z klawiatury nie zgłasza zmian, sprawdzamy pole sami: „zapisz” na końcu i tekst stoi w miejscu → wykonaj.
+  kTimer = setInterval(() => {
+    const v = $("cmd").value;
+    if (v && v === lastSeen && trailingEndWord(v) >= 0) {
+      clearTimeout(kbEnd);
+      const cmdText = v.slice(0, trailingEndWord(v)).trim();
+      $("cmd").value = ""; lastSeen = "";
+      if (cmdText) run(cmdText);
+      return;
+    }
+    lastSeen = v;
+  }, 700);
 });
-$("cmd").addEventListener("blur", () => { clearInterval(kTimer); if (/(^|\s)koniec/i.test($("cmd").value)) $("cmd").dispatchEvent(new Event("input")); });
+$("cmd").addEventListener("blur", () => { clearInterval(kTimer); });
 
 // Skróty klawiszowe (komputer): „/” — pole poleceń, „M” — mikrofon. Działają, gdy nie piszesz w polu.
 document.addEventListener("keydown", (e) => {
