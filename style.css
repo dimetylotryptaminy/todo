@@ -142,6 +142,25 @@ li.done .txt { color: var(--done); text-decoration: line-through; }
 .login-actions { display: flex; justify-content: space-between; align-items: center; }
 
 @media (max-width: 640px) {
+  /* Telefon: pasek poleceń przyklejony na dole, w zasięgu kciuka; mikrofon skrajnie po prawej. */
+  body { padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px)); }
+  .top {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+    flex-direction: column-reverse; gap: 6px;
+    background: var(--paper); border-top: 1.5px solid var(--line);
+    padding-top: 8px;
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
+    padding-bottom: max(10px, env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -6px 20px rgba(0,0,0,.08);
+  }
+  .status { min-height: 0; }
+  .status:empty { display: none; }
+  .cmd { gap: 6px; }
+  .cmd input { padding: 12px; }
+  .btn { padding: 0 12px; background: var(--paper); color: var(--accent); }
+  .mic { width: 58px; min-height: 52px; border-radius: 14px; background: var(--accent); border-color: var(--accent); color: var(--paper); }
+  .mic svg { width: 26px; height: 26px; }
   .sheet { grid-template-columns: 1fr; }
   .box, .box:nth-child(2n) { border-right: 0; min-height: 0; }
   .box.inne { border-bottom: 1.5px solid var(--line); }

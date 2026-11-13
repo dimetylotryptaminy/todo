@@ -20,12 +20,12 @@
 <div class="wrap">
   <header class="top">
     <form class="cmd" id="cmdForm" autocomplete="off">
-      <button class="mic" id="mic" type="button" aria-label="Mów polecenie" hidden>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Z" fill="currentColor"/><path d="M18 11.5a6 6 0 0 1-12 0M12 17.5V21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-      </button>
       <input id="cmd" type="text" enterkeyhint="go" aria-label="Polecenie"
         placeholder="np. „dodaj do Genomtec wysłać umowę”">
       <button class="btn" id="cmdBtn" type="submit">Wykonaj</button>
+      <button class="mic" id="mic" type="button" aria-label="Mów polecenie" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Z" fill="currentColor"/><path d="M18 11.5a6 6 0 0 1-12 0M12 17.5V21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
     </form>
     <div class="status" id="status" aria-live="polite"></div>
   </header>
