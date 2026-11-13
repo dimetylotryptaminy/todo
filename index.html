@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tablica spółek</title>
+<meta name="theme-color" content="#fbfbf9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1b1d1b" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Tablica">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <form class="cmd" id="cmdForm" autocomplete="off">
+      <button class="mic" id="mic" type="button" aria-label="Mów polecenie" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Z" fill="currentColor"/><path d="M18 11.5a6 6 0 0 1-12 0M12 17.5V21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+      <input id="cmd" type="text" enterkeyhint="go" aria-label="Polecenie"
+        placeholder="np. „dodaj do Genomtec wysłać umowę”">
+      <button class="btn" id="cmdBtn" type="submit">Wykonaj</button>
+    </form>
+    <div class="status" id="status" aria-live="polite"></div>
+  </header>
+
+  <main class="sheet" id="sheet"></main>
+
+  <div class="bar">
+    <details class="help">
+      <summary>Polecenia głosowe</summary>
+      <ul class="helplist">
+        <li><b>dodaj do Nestmedic</b> zadzwonić do księgowej</li>
+        <li><b>usuń</b> zadzwonić do księgowej <i>(albo: usuń z Inne zakupy)</i></li>
+        <li><b>odhacz</b> umowa <i>(też: zrobione …, odznacz …)</i></li>
+        <li><b>zmień</b> umowa <b>na</b> wysłać aneks do umowy</li>
+        <li><b>przenieś</b> umowa <b>do</b> Orthoget</li>
+        <li>Kilka poleceń naraz oddziel słowem <b>„potem”</b> albo kropką.</li>
+      </ul>
+    </details>
+    <div class="bar-actions">
+      <button class="ghost" id="clearDone" type="button">Usuń zrobione</button>
+      <button class="ghost" id="logout" type="button" hidden>Wyloguj</button>
+    </div>
+  </div>
+</div>
+
+<div class="login" id="login" hidden>
+  <form class="login-card" id="loginForm">
+    <h1>Tablica spółek</h1>
+    <p>Zaloguj się, żeby zadania były te same na komputerze i telefonie.</p>
+    <label for="email">E-mail</label>
+    <input id="email" type="email" autocomplete="username" required>
+    <label for="password">Hasło (min. 6 znaków)</label>
+    <input id="password" type="password" autocomplete="current-password" minlength="6" required>
+    <p class="login-err" id="loginErr" aria-live="polite"></p>
+    <div class="login-actions">
+      <button class="btn" type="submit" id="signIn">Zaloguj</button>
+      <button class="ghost" type="button" id="signUp">Załóż konto</button>
+    </div>
+  </form>
+</div>
+
+<script src="config.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
