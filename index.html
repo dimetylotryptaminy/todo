@@ -48,6 +48,7 @@
     </details>
     <div class="bar-actions">
       <button class="ghost" id="clearDone" type="button">Usuń zrobione</button>
+      <button class="ghost" id="setPass" type="button" hidden>Ustaw hasło</button>
       <button class="ghost" id="logout" type="button" hidden>Wyloguj</button>
     </div>
   </div>
@@ -70,6 +71,23 @@
     <div class="login-actions">
       <button class="btn" type="submit" id="signIn">Zaloguj</button>
       <button class="ghost" type="button" id="signUp">Załóż konto</button>
+    </div>
+    <button class="ghost forgot" type="button" id="forgot">Nie pamiętasz hasła?</button>
+  </form>
+</div>
+
+<div class="login" id="passDlg" hidden>
+  <form class="login-card" id="passForm">
+    <h1>Ustaw hasło</h1>
+    <p>Dzięki hasłu zalogujesz się tym samym kontem na iPhonie (e-mail + hasło), bez Google.</p>
+    <label for="newPass">Nowe hasło (min. 6 znaków)</label>
+    <input id="newPass" type="password" autocomplete="new-password" minlength="6" required>
+    <label for="newPass2">Powtórz hasło</label>
+    <input id="newPass2" type="password" autocomplete="new-password" minlength="6" required>
+    <p class="login-err" id="passErr" aria-live="polite"></p>
+    <div class="login-actions">
+      <button class="btn" type="submit">Zapisz hasło</button>
+      <button class="ghost" type="button" id="passCancel">Anuluj</button>
     </div>
   </form>
 </div>

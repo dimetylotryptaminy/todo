@@ -1,7 +1,7 @@
 import { CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v27";
+const APP_VERSION = "v28";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -173,6 +173,9 @@ let store;
 function showLogin(show) {
   $("login").hidden = !show;
   $("logout").hidden = show || !store || store.meta.local;
+  // „Ustaw hasło” — gdy konto loguje się tylko przez Google (na iPhonie Google w Safari nie działa).
+  const u = store && store.auth && store.auth.currentUser;
+  $("setPass").hidden = show || !u || (u.providerData || []).some((p) => p.providerId === "password");
 }
 const AUTH_ERR = {
   "auth/invalid-credential": "Nieprawidłowy e-mail lub hasło.",
@@ -214,6 +217,39 @@ async function doAuth(create) {
 $("loginForm").addEventListener("submit", (e) => { e.preventDefault(); doAuth(false); });
 $("signUp").addEventListener("click", () => doAuth(true));
 $("logout").addEventListener("click", () => store.A.signOut(store.auth));
+
+$("setPass").addEventListener("click", () => { $("passErr").textContent = ""; $("passDlg").hidden = false; $("newPass").focus(); });
+$("passCancel").addEventListener("click", () => { $("passDlg").hidden = true; });
+$("passForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const a = $("newPass").value, b = $("newPass2").value;
+  if (a.length < 6) { $("passErr").textContent = "Hasło musi mieć co najmniej 6 znaków."; return; }
+  if (a !== b) { $("passErr").textContent = "Hasła się różnią."; return; }
+  const u = store.auth.currentUser;
+  try {
+    await store.A.linkWithCredential(u, store.A.EmailAuthProvider.credential(u.email, a));
+    $("passDlg").hidden = true; $("newPass").value = $("newPass2").value = "";
+    $("setPass").hidden = true;
+    note("Hasło ustawione. Na iPhonie zaloguj się: " + u.email + " + to hasło.");
+  } catch (err) {
+    $("passErr").textContent = {
+      "auth/requires-recent-login": "Ze względów bezpieczeństwa wyloguj się, zaloguj ponownie przez Google i od razu ustaw hasło.",
+      "auth/weak-password": "Hasło jest za słabe (min. 6 znaków).",
+      "auth/provider-already-linked": "To konto ma już hasło.",
+      "auth/credential-already-in-use": "Na ten e-mail istnieje już osobne konto z hasłem.",
+      "auth/email-already-in-use": "Na ten e-mail istnieje już osobne konto z hasłem.",
+    }[err.code] || "Nie udało się: " + (err.code || err.message);
+  }
+});
+
+$("forgot").addEventListener("click", async () => {
+  const email = $("email").value.trim();
+  if (!email) { $("loginErr").textContent = "Wpisz e-mail powyżej, a wyślę link do ustawienia hasła."; return; }
+  try {
+    await store.A.sendPasswordResetEmail(store.auth, email);
+    $("loginErr").textContent = "Wysłano e-mail z linkiem do ustawienia hasła (sprawdź też spam).";
+  } catch (err) { $("loginErr").textContent = AUTH_ERR[err.code] || "Nie udało się: " + (err.code || err.message); }
+});
 
 // ---------------- rendering ----------------
 const todos = () => Object.entries(store.items).filter(([, d]) => d && d.type === "todo").map(([id, d]) => ({ id, ...d }));
