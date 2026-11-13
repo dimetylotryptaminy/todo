@@ -1,7 +1,7 @@
 import { CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v18";
+const APP_VERSION = "v19";
 // Podgląd zdarzeń mikrofonu: otwórz adres z „?debug”, np. …/todo/?debug
 const DEBUG = /[?&]debug/.test(location.search);
 const dbgLines = [];
@@ -495,18 +495,20 @@ if (IOS && !SR) {
 
   // Tekst liczymy od początku nagrywania (wyniki ostateczne + bieżące) i pamiętamy, ile już zapisaliśmy.
   // Nie polegamy na „isFinal”: Safari na iPhonie potrafi nigdy nie oznaczyć wyniku jako ostatecznego.
-  let consumed = 0, lastFull = "", restartTimer = null;
+  let consumed = 0, lastFull = "", restartTimer = null; // restartTimer: zostawiony dla zgodności
 
   function onTranscript(full) {
     lastFull = full;
     let pendingText = full.slice(consumed);
-    if (CANCEL.test(pendingText)) { consumed = full.length; buffer = ""; show(); note("Anulowano."); return; }
-    let m;
-    while ((m = pendingText.match(END))) {
+    if (CANCEL.test(pendingText)) { consumed = full.length; buffer = ""; stopListening("Anulowano."); return; }
+    const m = pendingText.match(END);
+    if (m) {
+      // „koniec” = zapisz i wyłącz mikrofon (jedno stuknięcie, jedno zadanie)
       const text = pendingText.slice(0, m.index).trim();
-      consumed += m.index + m[0].length;
-      pendingText = full.slice(consumed);
-      if (text) commit(text);
+      consumed = full.length; buffer = "";
+      if (text) commit(text); else note("Nic nie zapisano — nie usłyszałem treści zadania.", true);
+      stopListening();
+      return;
     }
     buffer = pendingText.trim();
     if (STOP.test(buffer)) { consumed = full.length; buffer = ""; stopListening("Mikrofon wyłączony."); return; }
@@ -517,11 +519,11 @@ if (IOS && !SR) {
     const r = rec = new SR();
     consumed = 0; lastFull = "";
     r.lang = "pl-PL"; r.interimResults = true; r.continuous = true; r.maxAlternatives = 1;
-    r.onstart = () => { dbg("start"); clearTimeout(restartTimer); };
+    r.onstart = () => dbg("start");
     r.onaudiostart = () => dbg("audiostart");
     r.onresult = (e) => {
-      if (r !== rec) return;                 // spóźnione wyniki starego nagrywania ignorujemy
-      heard = true; bumpIdle(); clearTimeout(restartTimer);
+      if (r !== rec || !listening) return;   // wyniki po wyłączeniu (lub ze starego nagrywania) ignorujemy
+      heard = true; bumpIdle();
       const full = Array.from(e.results).map((x) => x[0].transcript.trim()).join(" ").replace(/\s+/g, " ");
       dbg("result " + (e.results[e.results.length - 1].isFinal ? "F" : "i") + " #" + e.results.length + ": " + full.slice(-60));
       onTranscript(full);
@@ -541,20 +543,14 @@ if (IOS && !SR) {
       }[e.error];
       if (m) { note(m, true); stopListening(); }
     };
-    // Przeglądarka sama kończy nagrywanie po chwili ciszy — wtedy uruchamiamy nowe.
-    // Jeśli telefon nie pozwoli (iPhone wymaga stuknięcia), mówimy o tym wprost zamiast udawać, że słuchamy.
+    // Przeglądarka sama zakończyła nagrywanie (np. po ciszy), zanim padło „koniec”:
+    // zapisujemy to, co zostało powiedziane, i wyłączamy mikrofon — bez prób wznawiania.
     r.onend = () => {
       dbg("end");
       if (r !== rec || !listening) return;
-      const left = buffer.trim();
-      if (left && targetCat) { addToTarget(left); field().value = ""; }   // dokończone zdanie bez „koniec” w polu spółki
-      buffer = "";
-      try { startRec(); } catch (err) { dbg("restart throw " + err.message); }
-      restartTimer = setTimeout(() => {
-        dbg("restart timeout");
-        stopListening();
-        note("Mikrofon się wyłączył. Stuknij go ponownie, żeby mówić dalej.", true);
-      }, 2500);
+      const left = buffer.trim(); buffer = "";
+      if (left) commit(left);
+      stopListening(left ? "" : "Mikrofon wyłączony.");
     };
     r.start();
   }
@@ -580,8 +576,8 @@ if (IOS && !SR) {
     btn.classList.add("on"); btn.setAttribute("aria-label", "Wyłącz mikrofon");
     setTarget("");
     note(cat
-      ? `Słucham… Mów zadanie do ${cat}, na końcu powiedz „koniec”. Kliknij mikrofon, żeby skończyć.`
-      : "Słucham… Powiedz np. „dodaj Genomtec wysłać umowę koniec”. Kliknij mikrofon, żeby skończyć.");
+      ? `Słucham… Mów zadanie do ${cat}, na końcu powiedz „koniec”.`
+      : "Słucham… Powiedz np. „dodaj Genomtec wysłać umowę koniec”.");
     bumpIdle();
     // Licznik „nic nie słyszę” rusza dopiero, gdy mikrofon naprawdę nagrywa (nie w trakcie pytania o zgodę).
     const armWatchdog = () => watchdog = setTimeout(() => {
