@@ -8,3 +8,6 @@ window.FIREBASE_CONFIG = {
   messagingSenderId: "565869103462",
   appId: "1:565869103462:web:c3900152321b1bc7b3a0a7",
 };
+
+// Adres serwera rozpoznawania mowy (Cloudflare Worker z worker/stt-worker.js). Pusty = rozpoznawanie w przeglądarce.
+window.STT_URL = "";

@@ -1,7 +1,7 @@
 import { CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v25";
+const APP_VERSION = "v26";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -698,6 +698,143 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "/") { e.preventDefault(); $("cmd").focus(); }
   if ((e.key === "m" || e.key === "M") && !$("mic").hidden) { e.preventDefault(); $("mic").click(); }
 });
+
+// ---------------- rozpoznawanie mowy przez serwer (OpenAI) ----------------
+// Gdy w config.js jest STT_URL, mikrofony nagrywają dźwięk i wysyłają go do naszego serwera (Cloudflare Worker),
+// który zwraca tekst. Działa jednakowo na iPhonie i komputerze, bez przeładowań. Bez STT_URL — dawny sposób (Safari/Chrome).
+const STT_URL = (window.STT_URL || "").trim();
+const cloudReady = () => !!(STT_URL && store && store.auth && store.uid && navigator.mediaDevices && window.MediaRecorder);
+
+const cloud = { rec: null };   // trwające nagranie: {btn, cat, mr, stream, ctx, timer, stopped}
+
+function cloudSetTarget(cat) {
+  document.querySelectorAll(".box.target").forEach((b) => b.classList.remove("target"));
+  if (cat) $("box-" + cat.toLowerCase()).classList.add("target");
+}
+function cloudBtnOff(btn) { btn.classList.remove("on"); }
+
+async function cloudToggle(btn, cat) {
+  const r = cloud.rec;
+  if (r && r.btn === btn) { r.spoke = true; cloudStop("send"); return; }   // ten sam mikrofon = koniec nagrania (wysyłamy zawsze)
+  if (r) {                                                         // inny mikrofon w trakcie = zmiana pola
+    cloudBtnOff(r.btn); r.btn = btn; r.cat = cat; btn.classList.add("on"); cloudSetTarget(cat);
+    note(cat ? `Nagrywam do ${cat}…` : "Nagrywam polecenie…"); return;
+  }
+  if (!navigator.onLine) { note("Brak internetu — rozpoznawanie mowy wymaga połączenia. Wpisz zadanie ręcznie.", true); return; }
+
+  // AudioContext tworzymy od razu w stuknięciu (iPhone pozwala na dźwięk tylko w reakcji na gest).
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ctx = AC ? new AC() : null;
+  if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {});
+  const rec = cloud.rec = { btn, cat, ctx, stopped: false, spoke: false };
+  btn.classList.add("on"); cloudSetTarget(cat);
+  note(cat ? `Mów zadanie do ${cat}. Zapisze się, gdy skończysz mówić.` : "Mów polecenie, np. „dodaj Genomtec wysłać umowę”.");
+
+  try {
+    rec.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  } catch (e) {
+    cloud.rec = null; cloudBtnOff(btn); cloudSetTarget(null); if (ctx) ctx.close().catch(() => {});
+    note(e && e.name === "NotAllowedError"
+      ? (IOS ? "Brak zgody na mikrofon. Ustawienia → Aplikacje → Safari → Mikrofon → Pozwól." : "Brak zgody na mikrofon. Kliknij ikonę w pasku adresu → Mikrofon → Zezwalaj.")
+      : "Nie udało się włączyć mikrofonu.", true);
+    return;
+  }
+  if (rec.stopped) { rec.stream.getTracks().forEach((t) => t.stop()); return; }   // wyłączony, zanim ruszył
+
+  const mime = ["audio/webm;codecs=opus", "audio/mp4", "audio/webm", "audio/aac"].find((m) => window.MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || "";
+  const mr = rec.mr = new MediaRecorder(rec.stream, mime ? { mimeType: mime } : undefined);
+  const chunks = [];
+  mr.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+  mr.onstop = () => {
+    rec.stream.getTracks().forEach((t) => t.stop());
+    if (rec.ctx) rec.ctx.close().catch(() => {});
+    if (rec.mode !== "send") return;
+    if (!rec.spoke) { note("Nic nie usłyszałem. Stuknij mikrofon i mów trochę głośniej.", true); return; }
+    const blob = new Blob(chunks, { type: (mr.mimeType || mime || "audio/mp4").split(";")[0] });
+    transcribe(blob, rec.cat, rec.btn);
+  };
+  mr.start(250);
+  dbg("nagrywanie " + (mr.mimeType || mime || "?"));
+
+  // Wykrywanie ciszy: po wypowiedzi 1,5 s ciszy kończy nagranie. Bez mowy przez 8 s — rezygnuje.
+  let floor = 1, frames = 0, loud = 0, quietSince = 0;
+  const started = Date.now();
+  if (ctx) {
+    const src = ctx.createMediaStreamSource(rec.stream);
+    const an = ctx.createAnalyser(); an.fftSize = 1024; src.connect(an);
+    const buf = new Float32Array(an.fftSize);
+    rec.timer = setInterval(() => {
+      an.getFloatTimeDomainData(buf);
+      let sum = 0; for (const v of buf) sum += v * v;
+      const rms = Math.sqrt(sum / buf.length);
+      frames++;
+      // poziom tła = najcichszy moment (powoli dopuszczamy wzrost), więc mowa od pierwszej sekundy nie zawyży tła
+      floor = rms < floor ? rms : floor * 1.002;
+      if (frames <= 3) return;
+      const thr = Math.max(0.012, floor * 3);
+      if (rms > thr) { loud++; quietSince = 0; if (loud >= 2) rec.spoke = true; }
+      else { loud = 0; if (rec.spoke && !quietSince) quietSince = Date.now(); }
+      if (rec.spoke && quietSince && Date.now() - quietSince > 1500) cloudStop("send");
+      else if (!rec.spoke && Date.now() - started > 8000) cloudStop("send");
+      else if (Date.now() - started > 45000) cloudStop("send");
+    }, 100);
+  } else {
+    rec.spoke = true;                                                          // bez analizy dźwięku: kończysz stuknięciem
+    rec.timer = setTimeout(() => cloudStop("send"), 30000);
+  }
+}
+
+function cloudStop(mode) {
+  const rec = cloud.rec; if (!rec) return;
+  cloud.rec = null; rec.stopped = true; rec.mode = mode;
+  clearInterval(rec.timer); clearTimeout(rec.timer);
+  cloudBtnOff(rec.btn); cloudSetTarget(null);
+  if (rec.mr && rec.mr.state !== "inactive") rec.mr.stop();
+  else if (rec.stream) rec.stream.getTracks().forEach((t) => t.stop());
+}
+
+async function transcribe(blob, cat, btn) {
+  btn.classList.add("busy");
+  note("Rozpoznaję…");
+  try {
+    const token = await store.auth.currentUser.getIdToken();
+    const res = await fetch(STT_URL, { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": blob.type || "audio/mp4" }, body: blob });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      dbg("stt " + res.status + " " + (data.error || "") + " " + (data.detail || ""));
+      note({ 401: "Serwer mowy nie rozpoznał logowania. Wyloguj się i zaloguj ponownie.",
+             403: "Ten e-mail nie ma dostępu do rozpoznawania mowy (ALLOWED_EMAILS w Cloudflare).",
+             502: "Usługa rozpoznawania mowy odmówiła (sprawdź klucz i środki na koncie OpenAI)." }[res.status]
+           || "Nie udało się rozpoznać mowy (błąd " + res.status + ").", true);
+      return;
+    }
+    let text = String(data.text || "").trim();
+    dbg("stt: " + text);
+    const cut = trailingEndWord(text); if (cut >= 0) text = text.slice(0, cut);
+    text = text.replace(/^[\s:,\-–—]+|[\s,.;:!?\-–—]+$/g, "");
+    if (!text) { note("Nic nie rozpoznałem. Spróbuj jeszcze raz.", true); return; }
+    if (cat) {
+      const t = text.charAt(0).toUpperCase() + text.slice(1);
+      const id = newId(); flashId = id;
+      write(id, { type: "todo", cat, text: t, done: false, created: Date.now(), updated: Date.now() });
+      lastUndo = [[id, null]];
+      note(`Dodano do ${cat}: ${t}`, false, true);
+    } else {
+      $("cmd").value = text; run(text);
+    }
+  } catch (e) {
+    dbg("stt wyjątek " + (e && e.message));
+    note(navigator.onLine ? "Nie udało się połączyć z serwerem mowy." : "Brak internetu — rozpoznawanie mowy wymaga połączenia.", true);
+  } finally { btn.classList.remove("busy"); }
+}
+
+// Przejmujemy kliknięcia mikrofonów, gdy serwer mowy jest skonfigurowany (przed dawną obsługą Safari/Chrome).
+document.addEventListener("click", (e) => {
+  const b = e.target.closest && e.target.closest("#mic, .boxmic");
+  if (!b || !cloudReady()) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  cloudToggle(b, b.id === "mic" ? null : b.dataset.cat);
+}, true);
 
 // iPhone: Safari rozpoznaje mowę tylko RAZ na jedno załadowanie strony (kolejne nagrania: mikrofon włączony, zero tekstu).
 // Dlatego po każdym nagraniu po cichu przeładowujemy stronę (z pamięci telefonu, ułamek sekundy).
