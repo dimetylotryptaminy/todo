@@ -1,7 +1,7 @@
 import { CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v16";
+const APP_VERSION = "v17";
 // Każdy błąd pokazuje się na pasku statusu, żeby było go widać na telefonie (zrzut ekranu = diagnoza).
 window.addEventListener("error", (e) => { try { note("Błąd: " + (e.message || e.error), true); } catch {} });
 window.addEventListener("unhandledrejection", (e) => { try { note("Błąd: " + ((e.reason && (e.reason.code || e.reason.message)) || e.reason), true); } catch {} });
@@ -483,9 +483,10 @@ if (IOS && !SR) {
   }
 
   function startRec() {
-    rec = new SR();
-    rec.lang = "pl-PL"; rec.interimResults = true; rec.continuous = true; rec.maxAlternatives = 1;
-    rec.onresult = (e) => {
+    const r = rec = new SR();
+    r.lang = "pl-PL"; r.interimResults = true; r.continuous = true; r.maxAlternatives = 1;
+    r.onresult = (e) => {
+      if (r !== rec) return;                 // spóźnione wyniki starego nagrywania ignorujemy
       heard = true; bumpIdle();
       let interim = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -495,7 +496,8 @@ if (IOS && !SR) {
       consume();
       if (listening) show(interim);
     };
-    rec.onerror = (e) => {
+    r.onerror = (e) => {
+      if (r !== rec) return;
       const m = {
         "not-allowed": IOS
           ? "Brak zgody na mikrofon. Ustawienia → Safari → Mikrofon → Zezwalaj (albo „aA” w pasku adresu → Ustawienia witryny)."
@@ -508,15 +510,28 @@ if (IOS && !SR) {
       }[e.error];
       if (m) { note(m, true); stopListening(); }
     };
-    rec.onend = () => { if (listening) { try { rec.start(); } catch { stopListening(); } } };
-    rec.start();
+    // Przeglądarka sama kończy nagrywanie po chwili ciszy — wtedy wznawiamy to samo nagrywanie.
+    // Koniec starego nagrywania (np. po przełączeniu) niczego już nie rusza.
+    r.onend = () => { if (r === rec && listening) { try { r.start(); } catch { stopListening(); } } };
+    r.start();
   }
 
   function toggle(btn, cat) {
+    if (listening && btn === activeBtn) { stopListening("Mikrofon wyłączony."); return; }   // ten sam przycisk = wyłącz
     if (listening) {
-      const same = btn === activeBtn;
-      stopListening("Mikrofon wyłączony.");
-      if (same) return;                     // ten sam przycisk = wyłącz; inny = przełącz na nowe pole
+      // Inny przycisk: nie restartujemy mikrofonu (iPhone tego nie lubi) — tylko zmieniamy pole docelowe.
+      const left = buffer.trim();
+      if (left && targetCat) addToTarget(left);
+      else if (left) { $("cmd").value = left; run(left); }
+      if (targetCat) field().value = "";
+      buffer = "";
+      activeBtn.classList.remove("on");
+      activeBtn.setAttribute("aria-label", activeBtn === mic ? "Włącz mikrofon" : "Dyktuj zadanie do " + targetCat);
+      targetCat = cat; activeBtn = btn;
+      btn.classList.add("on"); btn.setAttribute("aria-label", "Wyłącz mikrofon");
+      setTarget(""); bumpIdle();
+      note(cat ? `Teraz mów zadanie do ${cat}, na końcu „koniec”.` : "Teraz mów polecenie, np. „dodaj Genomtec … koniec”.");
+      return;
     }
     listening = true; buffer = ""; heard = false; targetCat = cat; activeBtn = btn;
     btn.classList.add("on"); btn.setAttribute("aria-label", "Wyłącz mikrofon");
