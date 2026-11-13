@@ -304,18 +304,36 @@ $("cmdForm").addEventListener("submit", (e) => {
   const t = $("cmd").value.trim(); if (t) run(t);
 });
 
-// Mikrofon w aplikacji (Web Speech API). Gdy przeglądarka go nie ma, zostaje mikrofon na klawiaturze.
+// Mikrofon.
+// iPhone/iPad: rozpoznawanie mowy w aplikacji z ekranu początkowego działa zawodnie (ikona pulsuje, nic się nie dzieje),
+// więc przycisk otwiera klawiaturę, a dyktuje się mikrofonem na klawiaturze — to działa zawsze, także offline.
+// Inne urządzenia: Web Speech API; gdy w ciągu kilku sekund nic nie przyjdzie, przełącza na klawiaturę.
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-if (SR) {
-  const mic = $("mic");
-  mic.hidden = false;
-  let rec = null, finalText = "";
+const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const mic = $("mic");
+mic.hidden = false;
+let dictating = false;
+
+function keyboardDictation(msg) {
+  const cmd = $("cmd");
+  cmd.focus();
+  dictating = true;
+  note(msg || "Stuknij 🎤 na klawiaturze (na dole po prawej), powiedz polecenie, potem „Idź”.");
+}
+$("cmd").addEventListener("blur", () => { dictating = false; });
+
+if (IOS || !SR) {
+  mic.addEventListener("click", () => keyboardDictation(SR || IOS ? null : "Ta przeglądarka nie rozpoznaje mowy. Użyj dyktowania systemowego (na Macu: dwa razy Fn)."));
+} else {
+  let rec = null, finalText = "", heard = false, watchdog = null;
+  const stopUi = () => { mic.classList.remove("on"); mic.setAttribute("aria-label", "Mów polecenie"); clearTimeout(watchdog); };
   mic.addEventListener("click", () => {
     if (rec) { rec.stop(); return; }
     rec = new SR();
     rec.lang = "pl-PL"; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
-    finalText = "";
+    finalText = ""; heard = false;
     rec.onresult = (e) => {
+      heard = true;
       let interim = "";
       finalText = "";
       for (const r of e.results) { if (r.isFinal) finalText += r[0].transcript; else interim += r[0].transcript; }
@@ -323,22 +341,36 @@ if (SR) {
     };
     rec.onerror = (e) => {
       const m = {
-        "not-allowed": "Brak zgody na mikrofon. Zezwól w ustawieniach przeglądarki albo użyj mikrofonu na klawiaturze.",
-        "service-not-allowed": "Rozpoznawanie mowy jest wyłączone. Na iPhonie włącz Ustawienia → Ogólne → Klawiatura → Dyktowanie.",
-        "network": "Rozpoznawanie mowy potrzebuje teraz internetu. Offline użyj mikrofonu na klawiaturze.",
+        "not-allowed": "Brak zgody na mikrofon. Zezwól w ustawieniach przeglądarki albo użyj dyktowania systemowego.",
+        "service-not-allowed": "Rozpoznawanie mowy jest wyłączone. Użyj dyktowania systemowego (na Macu: dwa razy Fn).",
+        "network": "Rozpoznawanie mowy potrzebuje internetu. Offline użyj dyktowania systemowego (na Macu: dwa razy Fn).",
         "no-speech": "Nic nie usłyszałem. Spróbuj jeszcze raz.",
       }[e.error];
       if (m) note(m, true);
     };
     rec.onend = () => {
-      mic.classList.remove("on"); mic.setAttribute("aria-label", "Mów polecenie");
-      rec = null;
+      stopUi(); rec = null;
       const t = $("cmd").value.trim();
       if (finalText.trim() && t) run(t);
     };
+    watchdog = setTimeout(() => {
+      if (rec && !heard) { try { rec.abort(); } catch {} keyboardDictation("Mikrofon w przeglądarce nie odpowiada. Użyj dyktowania systemowego (na Macu: dwa razy Fn), potem Enter."); }
+    }, 7000);
     mic.classList.add("on"); mic.setAttribute("aria-label", "Zatrzymaj nagrywanie");
-    try { rec.start(); } catch { rec = null; mic.classList.remove("on"); }
+    try { rec.start(); } catch { rec = null; stopUi(); keyboardDictation(); }
   });
+}
+
+// iPhone: gdy otwiera się klawiatura, pasek poleceń przesuwa się nad nią.
+if (window.visualViewport) {
+  const bar = document.querySelector(".top");
+  const fit = () => {
+    const vv = window.visualViewport;
+    const hidden = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    bar.style.transform = hidden > 0 ? `translateY(-${hidden}px)` : "";
+  };
+  visualViewport.addEventListener("resize", fit);
+  visualViewport.addEventListener("scroll", fit);
 }
 
 // Skróty klawiszowe (komputer): „/” — pole poleceń, „M” — mikrofon. Działają, gdy nie piszesz w polu.
