@@ -178,3 +178,5 @@ li.done .txt { color: var(--done); text-decoration: line-through; }
 .boxmic:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .boxmic.on { background: var(--warn); border-color: var(--warn); color: var(--paper); animation: pulse 1.2s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .boxmic.on { animation: none; } }
+#dbg { position: fixed; top: env(safe-area-inset-top, 0px); left: 0; right: 0; z-index: 30; margin: 0; padding: 6px 10px;
+  background: rgba(0,0,0,.82); color: #b8f5c8; font: 11px/1.35 ui-monospace, Menlo, monospace; white-space: pre-wrap; max-height: 40vh; overflow: auto; }

@@ -1,7 +1,18 @@
 import { CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v17";
+const APP_VERSION = "v18";
+// Podgląd zdarzeń mikrofonu: otwórz adres z „?debug”, np. …/todo/?debug
+const DEBUG = /[?&]debug/.test(location.search);
+const dbgLines = [];
+function dbg(msg) {
+  if (!DEBUG) return;
+  const t = new Date().toTimeString().slice(3, 8);
+  dbgLines.push(t + " " + msg); if (dbgLines.length > 14) dbgLines.shift();
+  let el = document.getElementById("dbg");
+  if (!el) { el = document.createElement("pre"); el.id = "dbg"; document.body.append(el); }
+  el.textContent = dbgLines.join("\n");
+}
 // Każdy błąd pokazuje się na pasku statusu, żeby było go widać na telefonie (zrzut ekranu = diagnoza).
 window.addEventListener("error", (e) => { try { note("Błąd: " + (e.message || e.error), true); } catch {} });
 window.addEventListener("unhandledrejection", (e) => { try { note("Błąd: " + ((e.reason && (e.reason.code || e.reason.message)) || e.reason), true); } catch {} });
@@ -458,7 +469,7 @@ if (IOS && !SR) {
   }
 
   function stopListening(msg) {
-    listening = false; clearTimeout(watchdog); clearTimeout(idle);
+    listening = false; clearTimeout(watchdog); clearTimeout(idle); clearTimeout(restartTimer);
     if (rec) { try { rec.stop(); } catch {} }
     if (activeBtn) { activeBtn.classList.remove("on"); activeBtn.setAttribute("aria-label", activeBtn === mic ? "Włącz mikrofon" : "Dyktuj zadanie do " + targetCat); }
     clearTargets();
@@ -482,21 +493,41 @@ if (IOS && !SR) {
     if (STOP.test(buffer)) { buffer = ""; stopListening("Mikrofon wyłączony."); }
   }
 
+  // Tekst liczymy od początku nagrywania (wyniki ostateczne + bieżące) i pamiętamy, ile już zapisaliśmy.
+  // Nie polegamy na „isFinal”: Safari na iPhonie potrafi nigdy nie oznaczyć wyniku jako ostatecznego.
+  let consumed = 0, lastFull = "", restartTimer = null;
+
+  function onTranscript(full) {
+    lastFull = full;
+    let pendingText = full.slice(consumed);
+    if (CANCEL.test(pendingText)) { consumed = full.length; buffer = ""; show(); note("Anulowano."); return; }
+    let m;
+    while ((m = pendingText.match(END))) {
+      const text = pendingText.slice(0, m.index).trim();
+      consumed += m.index + m[0].length;
+      pendingText = full.slice(consumed);
+      if (text) commit(text);
+    }
+    buffer = pendingText.trim();
+    if (STOP.test(buffer)) { consumed = full.length; buffer = ""; stopListening("Mikrofon wyłączony."); return; }
+    if (listening) show();
+  }
+
   function startRec() {
     const r = rec = new SR();
+    consumed = 0; lastFull = "";
     r.lang = "pl-PL"; r.interimResults = true; r.continuous = true; r.maxAlternatives = 1;
+    r.onstart = () => { dbg("start"); clearTimeout(restartTimer); };
+    r.onaudiostart = () => dbg("audiostart");
     r.onresult = (e) => {
       if (r !== rec) return;                 // spóźnione wyniki starego nagrywania ignorujemy
-      heard = true; bumpIdle();
-      let interim = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const r = e.results[i];
-        if (r.isFinal) buffer = (buffer + " " + r[0].transcript).trim(); else interim += r[0].transcript;
-      }
-      consume();
-      if (listening) show(interim);
+      heard = true; bumpIdle(); clearTimeout(restartTimer);
+      const full = Array.from(e.results).map((x) => x[0].transcript.trim()).join(" ").replace(/\s+/g, " ");
+      dbg("result " + (e.results[e.results.length - 1].isFinal ? "F" : "i") + " #" + e.results.length + ": " + full.slice(-60));
+      onTranscript(full);
     };
     r.onerror = (e) => {
+      dbg("error " + e.error);
       if (r !== rec) return;
       const m = {
         "not-allowed": IOS
@@ -510,9 +541,21 @@ if (IOS && !SR) {
       }[e.error];
       if (m) { note(m, true); stopListening(); }
     };
-    // Przeglądarka sama kończy nagrywanie po chwili ciszy — wtedy wznawiamy to samo nagrywanie.
-    // Koniec starego nagrywania (np. po przełączeniu) niczego już nie rusza.
-    r.onend = () => { if (r === rec && listening) { try { r.start(); } catch { stopListening(); } } };
+    // Przeglądarka sama kończy nagrywanie po chwili ciszy — wtedy uruchamiamy nowe.
+    // Jeśli telefon nie pozwoli (iPhone wymaga stuknięcia), mówimy o tym wprost zamiast udawać, że słuchamy.
+    r.onend = () => {
+      dbg("end");
+      if (r !== rec || !listening) return;
+      const left = buffer.trim();
+      if (left && targetCat) { addToTarget(left); field().value = ""; }   // dokończone zdanie bez „koniec” w polu spółki
+      buffer = "";
+      try { startRec(); } catch (err) { dbg("restart throw " + err.message); }
+      restartTimer = setTimeout(() => {
+        dbg("restart timeout");
+        stopListening();
+        note("Mikrofon się wyłączył. Stuknij go ponownie, żeby mówić dalej.", true);
+      }, 2500);
+    };
     r.start();
   }
 
@@ -524,7 +567,7 @@ if (IOS && !SR) {
       if (left && targetCat) addToTarget(left);
       else if (left) { $("cmd").value = left; run(left); }
       if (targetCat) field().value = "";
-      buffer = "";
+      buffer = ""; consumed = lastFull.length;
       activeBtn.classList.remove("on");
       activeBtn.setAttribute("aria-label", activeBtn === mic ? "Włącz mikrofon" : "Dyktuj zadanie do " + targetCat);
       targetCat = cat; activeBtn = btn;
