@@ -1,7 +1,7 @@
 import { CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v11";
+const APP_VERSION = "v12";
 // Każdy błąd pokazuje się na pasku statusu, żeby było go widać na telefonie (zrzut ekranu = diagnoza).
 window.addEventListener("error", (e) => { try { note("Błąd: " + (e.message || e.error), true); } catch {} });
 window.addEventListener("unhandledrejection", (e) => { try { note("Błąd: " + ((e.reason && (e.reason.code || e.reason.message)) || e.reason), true); } catch {} });
@@ -326,7 +326,7 @@ function keyboardDictation(msg) {
 }
 $("cmd").addEventListener("blur", () => { dictating = false; });
 
-if (IOS) {
+if (IOS && !SR) {
   // iOS otwiera klawiaturę tylko po prawdziwym stuknięciu w pole (programowe focus() bywa ignorowane, np. w Chrome).
   // Dlatego przycisk mikrofonu na iOS to <label for="cmd">: stuknięcie w niego to dla iOS stuknięcie w pole.
   const label = document.createElement("label");
@@ -392,8 +392,12 @@ if (IOS) {
     };
     rec.onerror = (e) => {
       const m = {
-        "not-allowed": "Brak zgody na mikrofon. Kliknij ikonę kłódki w pasku adresu → Mikrofon → Zezwalaj, i przeładuj stronę.",
-        "service-not-allowed": "Przeglądarka blokuje rozpoznawanie mowy. Użyj Chrome albo dyktowania systemowego (na Macu: dwa razy Fn).",
+        "not-allowed": IOS
+          ? "Brak zgody na mikrofon. Ustawienia → Safari → Mikrofon → Zezwalaj (albo „aA” w pasku adresu → Ustawienia witryny)."
+          : "Brak zgody na mikrofon. Kliknij ikonę kłódki w pasku adresu → Mikrofon → Zezwalaj, i przeładuj stronę.",
+        "service-not-allowed": IOS
+          ? "iPhone blokuje rozpoznawanie mowy. Włącz: Ustawienia → Ogólne → Klawiatura → Włącz dyktowanie (oraz Siri)."
+          : "Przeglądarka blokuje rozpoznawanie mowy. Użyj Chrome albo dyktowania systemowego (na Macu: dwa razy Fn).",
         "network": "Rozpoznawanie mowy potrzebuje internetu. Offline użyj dyktowania systemowego (na Macu: dwa razy Fn).",
         "audio-capture": "Nie wykryto mikrofonu.",
       }[e.error];
@@ -410,7 +414,9 @@ if (IOS) {
     note("Słucham… Powiedz np. „dodaj Genomtec wysłać umowę koniec”. Kliknij mikrofon, żeby skończyć.");
     bumpIdle();
     watchdog = setTimeout(() => {
-      if (listening && !heard) note("Nic nie słyszę. Sprawdź, czy przeglądarka ma dostęp do mikrofonu (ikona w pasku adresu).", true);
+      if (listening && !heard) note(IOS
+        ? "Nic nie słyszę. Sprawdź: Ustawienia → Ogólne → Klawiatura → Włącz dyktowanie, oraz zgodę na mikrofon dla Safari."
+        : "Nic nie słyszę. Sprawdź, czy przeglądarka ma dostęp do mikrofonu (ikona w pasku adresu).", true);
     }, 8000);
     try { startRec(); } catch { stopListening(); keyboardDictation(); }
   });
