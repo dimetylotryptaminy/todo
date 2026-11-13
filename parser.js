@@ -62,6 +62,13 @@ function catAt(words, at) {
   return best;
 }
 
+// Nazwa spółki z początku tekstu (np. „genom tek wysłać…”) albo null.
+export function catOf(text) {
+  const W = norm(text).split(" ").filter(Boolean);
+  const c = catAt(W, 0);
+  return c ? c.cat : null;
+}
+
 const cap = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 const cleanText = (s) => cap(s.replace(/^[\s:,\-–—]+|[\s,.;:\-–—]+$/g, ""));
 

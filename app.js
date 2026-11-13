@@ -1,4 +1,4 @@
-import { CATS, parse } from "./parser.js";
+import { CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
 const FB = "https://www.gstatic.com/firebasejs/10.12.2/";
@@ -325,39 +325,79 @@ $("cmd").addEventListener("blur", () => { dictating = false; });
 if (IOS || !SR) {
   mic.addEventListener("click", () => keyboardDictation(SR || IOS ? null : "Ta przeglądarka nie rozpoznaje mowy. Użyj dyktowania systemowego (na Macu: dwa razy Fn)."));
 } else {
-  let rec = null, finalText = "", heard = false, watchdog = null;
-  const stopUi = () => { mic.classList.remove("on"); mic.setAttribute("aria-label", "Mów polecenie"); clearTimeout(watchdog); };
-  mic.addEventListener("click", () => {
-    if (rec) { rec.stop(); return; }
+  // Tryb dyktowania (komputer): mikrofon słucha ciągle. Mówisz „dodaj Genomtec … koniec” — zadanie zapisuje się
+  // po słowie „koniec”, a mikrofon słucha dalej, aż klikniesz go ponownie (albo powiesz „stop”).
+  let rec = null, listening = false, buffer = "", heard = false, watchdog = null, idle = null;
+  const END = /(^|\s)koniec([\s.,!?]|$)/i;
+  const STOP = /^\s*(stop|zakończ nagrywanie|wyłącz mikrofon)[\s.,!?]*$/i;
+  const CANCEL = /(^|\s)anuluj([\s.,!?]|$)/i;
+
+  const setTarget = (text) => {
+    document.querySelectorAll(".box.target").forEach((b) => b.classList.remove("target"));
+    const m = norm(text).match(/^(dodaj|dopisz|wpisz|zapisz)\s+(?:do\s+)?(.+)/);
+    if (!m) return;
+    const cat = catOf(m[2]);
+    if (cat) $("box-" + cat.toLowerCase()).classList.add("target");
+  };
+  const show = (interim = "") => { const t = (buffer + " " + interim).trim(); $("cmd").value = t; setTarget(t); };
+
+  function stopListening(msg) {
+    listening = false; clearTimeout(watchdog); clearTimeout(idle);
+    if (rec) { try { rec.stop(); } catch {} }
+    mic.classList.remove("on"); mic.setAttribute("aria-label", "Włącz mikrofon");
+    document.querySelectorAll(".box.target").forEach((b) => b.classList.remove("target"));
+    if (buffer.trim()) note("Mikrofon wyłączony. Niezapisany tekst jest w polu — powiedz „koniec” następnym razem albo wciśnij Enter.", true);
+    else if (msg) note(msg);
+  }
+  const bumpIdle = () => { clearTimeout(idle); idle = setTimeout(() => stopListening("Mikrofon wyłączył się po minucie ciszy."), 60000); };
+
+  function consume() {
+    if (CANCEL.test(buffer)) { buffer = ""; show(); note("Anulowano."); return; }
+    let m;
+    while ((m = buffer.match(END))) {
+      const cmdText = buffer.slice(0, m.index).trim();
+      buffer = buffer.slice(m.index + m[0].length).trim();
+      if (cmdText) { $("cmd").value = cmdText; run(cmdText); }
+    }
+    if (STOP.test(buffer)) { buffer = buffer.replace(STOP, " ").trim(); stopListening("Mikrofon wyłączony."); }
+  }
+
+  function startRec() {
     rec = new SR();
-    rec.lang = "pl-PL"; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
-    finalText = ""; heard = false;
+    rec.lang = "pl-PL"; rec.interimResults = true; rec.continuous = true; rec.maxAlternatives = 1;
     rec.onresult = (e) => {
-      heard = true;
+      heard = true; bumpIdle();
       let interim = "";
-      finalText = "";
-      for (const r of e.results) { if (r.isFinal) finalText += r[0].transcript; else interim += r[0].transcript; }
-      $("cmd").value = (finalText + " " + interim).trim();
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (r.isFinal) buffer = (buffer + " " + r[0].transcript).trim(); else interim += r[0].transcript;
+      }
+      consume();
+      if (listening) show(interim);
     };
     rec.onerror = (e) => {
       const m = {
-        "not-allowed": "Brak zgody na mikrofon. Zezwól w ustawieniach przeglądarki albo użyj dyktowania systemowego.",
-        "service-not-allowed": "Rozpoznawanie mowy jest wyłączone. Użyj dyktowania systemowego (na Macu: dwa razy Fn).",
+        "not-allowed": "Brak zgody na mikrofon. Kliknij ikonę kłódki w pasku adresu → Mikrofon → Zezwalaj, i przeładuj stronę.",
+        "service-not-allowed": "Przeglądarka blokuje rozpoznawanie mowy. Użyj Chrome albo dyktowania systemowego (na Macu: dwa razy Fn).",
         "network": "Rozpoznawanie mowy potrzebuje internetu. Offline użyj dyktowania systemowego (na Macu: dwa razy Fn).",
-        "no-speech": "Nic nie usłyszałem. Spróbuj jeszcze raz.",
+        "audio-capture": "Nie wykryto mikrofonu.",
       }[e.error];
-      if (m) note(m, true);
+      if (m) { note(m, true); stopListening(); }
     };
-    rec.onend = () => {
-      stopUi(); rec = null;
-      const t = $("cmd").value.trim();
-      if (finalText.trim() && t) run(t);
-    };
+    rec.onend = () => { if (listening) { try { rec.start(); } catch { stopListening(); } } };
+    rec.start();
+  }
+
+  mic.addEventListener("click", () => {
+    if (listening) { stopListening("Mikrofon wyłączony."); return; }
+    listening = true; buffer = ""; heard = false;
+    mic.classList.add("on"); mic.setAttribute("aria-label", "Wyłącz mikrofon");
+    note("Słucham… Powiedz np. „dodaj Genomtec wysłać umowę koniec”. Kliknij mikrofon, żeby skończyć.");
+    bumpIdle();
     watchdog = setTimeout(() => {
-      if (rec && !heard) { try { rec.abort(); } catch {} keyboardDictation("Mikrofon w przeglądarce nie odpowiada. Użyj dyktowania systemowego (na Macu: dwa razy Fn), potem Enter."); }
-    }, 7000);
-    mic.classList.add("on"); mic.setAttribute("aria-label", "Zatrzymaj nagrywanie");
-    try { rec.start(); } catch { rec = null; stopUi(); keyboardDictation(); }
+      if (listening && !heard) note("Nic nie słyszę. Sprawdź, czy przeglądarka ma dostęp do mikrofonu (ikona w pasku adresu).", true);
+    }, 8000);
+    try { startRec(); } catch { stopListening(); keyboardDictation(); }
   });
 }
 
