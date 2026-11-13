@@ -10,4 +10,4 @@ window.FIREBASE_CONFIG = {
 };
 
 // Adres serwera rozpoznawania mowy (Cloudflare Worker z worker/stt-worker.js). Pusty = rozpoznawanie w przeglądarce.
-window.STT_URL = "";
+window.STT_URL = "https://tablica-stt.dimetylotryptaminy.workers.dev";
