@@ -1,7 +1,7 @@
 import { CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v30";
+const APP_VERSION = "v31";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -932,6 +932,11 @@ function restoreAfterReload() {
 $("ver").textContent = "Wersja " + APP_VERSION;
 $("refreshApp").addEventListener("click", async () => {
   const b = $("refreshApp");
+  // Bez internetu nie czyścimy kopii aplikacji — inaczej nie dałoby się jej otworzyć aż do powrotu sieci.
+  let online = navigator.onLine;
+  // jakakolwiek odpowiedź serwera (nawet 404) = jest sieć; bez sieci service worker zwraca błąd i fetch rzuca wyjątek
+  if (online) { try { await fetch("__ping__?" + Date.now(), { cache: "no-store" }); } catch { online = false; } }
+  if (!online) { note("Brak internetu — odśwież aplikację, gdy wróci połączenie. Do tego czasu działa zapisana wersja.", true); return; }
   b.classList.add("busy"); b.disabled = true;
   try {
     if ("serviceWorker" in navigator) {
