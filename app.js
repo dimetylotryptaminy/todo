@@ -1,6 +1,10 @@
 import { CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
+const APP_VERSION = "v9";
+// Każdy błąd pokazuje się na pasku statusu, żeby było go widać na telefonie (zrzut ekranu = diagnoza).
+window.addEventListener("error", (e) => { try { note("Błąd: " + (e.message || e.error), true); } catch {} });
+window.addEventListener("unhandledrejection", (e) => { try { note("Błąd: " + ((e.reason && (e.reason.code || e.reason.message)) || e.reason), true); } catch {} });
 const FB = "https://www.gstatic.com/firebasejs/10.12.2/";
 const $ = (id) => document.getElementById(id);
 const lsGet = (k, d) => { try { const v = localStorage.getItem("tablica." + k); return v ? JSON.parse(v) : d; } catch { return d; } };
@@ -228,7 +232,7 @@ function render() {
   const w = weekInfo();
   const wk = $("week");
   wk.textContent = w.week + "/" + w.total;
-  const s = document.createElement("small"); s.textContent = w.range; wk.append(s);
+  const s = document.createElement("small"); s.textContent = w.range + " · " + APP_VERSION + (store.meta.local ? " · lokalnie" : store.email ? " · " + store.email : ""); wk.append(s);
   $("motto").textContent = store.motto;
   renderStatus();
 }
