@@ -1,7 +1,7 @@
 import { CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v14";
+const APP_VERSION = "v15";
 // Każdy błąd pokazuje się na pasku statusu, żeby było go widać na telefonie (zrzut ekranu = diagnoza).
 window.addEventListener("error", (e) => { try { note("Błąd: " + (e.message || e.error), true); } catch {} });
 window.addEventListener("unhandledrejection", (e) => { try { note("Błąd: " + ((e.reason && (e.reason.code || e.reason.message)) || e.reason), true); } catch {} });
@@ -32,7 +32,9 @@ async function firebaseStore(config) {
   ]);
   const app = initializeApp(config);
   const auth = A.getAuth(app);
-  const db = F.initializeFirestore(app, { localCache: F.persistentLocalCache({ tabManager: F.persistentMultipleTabManager() }) });
+  // Jedna karta = właściciel pamięci offline. Tryb „wielu kart” na iPhonie zawodził: uśpiona karta/aplikacja trzymała
+  // pamięć, a otwarta dostawała zmiany z opóźnieniem albo wcale (zadanie zapisywało się na serwerze, ale nie na ekranie).
+  const db = F.initializeFirestore(app, { localCache: F.persistentLocalCache({ tabManager: F.persistentSingleTabManager({ forceOwnership: true }) }) });
   const s = {
     items: {}, motto: DEFAULT_MOTTO, meta: { pending: false, offline: false }, onChange: () => {}, uid: null, email: "",
     auth, A,
@@ -58,8 +60,9 @@ async function firebaseStore(config) {
         migrateLocal(s);
       });
     },
-    put(id, data) { F.setDoc(F.doc(db, "users", s.uid, "items", id), data).catch(writeErr); },
-    del(id) { F.deleteDoc(F.doc(db, "users", s.uid, "items", id)).catch(writeErr); },
+    // Zmiana pokazuje się na ekranie od razu; serwer i tak przyśle potwierdzenie przez onSnapshot.
+    put(id, data) { s.items = { ...s.items, [id]: data }; s.onChange(); F.setDoc(F.doc(db, "users", s.uid, "items", id), data).catch(writeErr); },
+    del(id) { const { [id]: _, ...rest } = s.items; s.items = rest; s.onChange(); F.deleteDoc(F.doc(db, "users", s.uid, "items", id)).catch(writeErr); },
     setMotto(m) { F.setDoc(F.doc(db, "users", s.uid), { motto: m }, { merge: true }).catch(writeErr); },
   };
   return s;
