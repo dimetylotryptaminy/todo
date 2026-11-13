@@ -1,7 +1,7 @@
 import { CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v15";
+const APP_VERSION = "v16";
 // Każdy błąd pokazuje się na pasku statusu, żeby było go widać na telefonie (zrzut ekranu = diagnoza).
 window.addEventListener("error", (e) => { try { note("Błąd: " + (e.message || e.error), true); } catch {} });
 window.addEventListener("unhandledrejection", (e) => { try { note("Błąd: " + ((e.reason && (e.reason.code || e.reason.message)) || e.reason), true); } catch {} });
@@ -32,39 +32,103 @@ async function firebaseStore(config) {
   ]);
   const app = initializeApp(config);
   const auth = A.getAuth(app);
-  // Jedna karta = właściciel pamięci offline. Tryb „wielu kart” na iPhonie zawodził: uśpiona karta/aplikacja trzymała
-  // pamięć, a otwarta dostawała zmiany z opóźnieniem albo wcale (zadanie zapisywało się na serwerze, ale nie na ekranie).
-  const db = F.initializeFirestore(app, { localCache: F.persistentLocalCache({ tabManager: F.persistentSingleTabManager({ forceOwnership: true }) }) });
+  // Pamięć offline prowadzimy sami (localStorage), a Firestore służy tylko do wymiany z serwerem.
+  // Wbudowana pamięć Firestore (IndexedDB) na iPhonie zawodziła: zapis szedł na serwer, a ekran telefonu pokazywał stary stan.
+  //  • server  — ostatni stan z serwera (kopia w localStorage, więc działa też po uruchomieniu bez internetu),
+  //  • pending — zmiany z tego urządzenia, jeszcze niepotwierdzone przez serwer (też w localStorage, wysyłane ponownie po starcie).
+  // Ekran = server + pending, więc własne zmiany są widoczne zawsze i od razu.
+  const db = F.initializeFirestore(app, { localCache: F.memoryLocalCache() });
+  let server = {}, pending = {}, unsub = [];
+  const key = (k) => k + "." + s.uid;
+  const savePending = () => lsSet(key("pend"), pending);
+
   const s = {
-    items: {}, motto: DEFAULT_MOTTO, meta: { pending: false, offline: false }, onChange: () => {}, uid: null, email: "",
+    motto: DEFAULT_MOTTO, meta: { pending: false, offline: false }, onChange: () => {}, uid: null, email: "",
     auth, A,
+    get items() {
+      const out = { ...server };
+      for (const [id, p] of Object.entries(pending)) { if (p.del) delete out[id]; else out[id] = p.data; }
+      return out;
+    },
     start(cb) {
       s.onChange = cb;
-      let unsub = [];
       A.onAuthStateChanged(auth, (user) => {
         unsub.forEach((u) => u()); unsub = [];
-        s.items = {}; s.uid = user ? user.uid : null; s.email = user ? user.email : "";
+        s.uid = user ? user.uid : null; s.email = user ? user.email : "";
+        server = user ? lsGet(key("srv"), {}) : {};
+        pending = user ? lsGet(key("pend"), {}) : {};
+        s.motto = (user && lsGet(key("motto"), null)) || DEFAULT_MOTTO;
         showLogin(!user);
-        if (!user) { cb(); return; }
-        const itemsCol = F.collection(db, "users", user.uid, "items");
-        unsub.push(F.onSnapshot(itemsCol, { includeMetadataChanges: true }, (snap) => {
-          const next = {};
-          snap.forEach((d) => { next[d.id] = d.data(); });
-          s.items = next;
-          s.meta = { pending: snap.metadata.hasPendingWrites, offline: snap.metadata.fromCache };
-          cb();
-        }, (e) => { console.error(e); note("Błąd synchronizacji: " + (e.code || e.message), true); }));
-        unsub.push(F.onSnapshot(F.doc(db, "users", user.uid), (d) => {
-          s.motto = (d.exists() && d.data().motto) || DEFAULT_MOTTO; cb();
-        }, () => {}));
+        refreshMeta(); cb();
+        if (!user) return;
+        subscribe();
+        flush();
         migrateLocal(s);
       });
+      document.addEventListener("visibilitychange", () => {
+        // iPhone zrywa połączenie aplikacji w tle — po powrocie łączymy się od nowa i dosyłamy zaległe zmiany.
+        if (document.visibilityState === "visible" && s.uid) { subscribe(); flush(); }
+      });
+      window.addEventListener("online", () => { if (s.uid) { subscribe(); flush(); } });
     },
-    // Zmiana pokazuje się na ekranie od razu; serwer i tak przyśle potwierdzenie przez onSnapshot.
-    put(id, data) { s.items = { ...s.items, [id]: data }; s.onChange(); F.setDoc(F.doc(db, "users", s.uid, "items", id), data).catch(writeErr); },
-    del(id) { const { [id]: _, ...rest } = s.items; s.items = rest; s.onChange(); F.deleteDoc(F.doc(db, "users", s.uid, "items", id)).catch(writeErr); },
-    setMotto(m) { F.setDoc(F.doc(db, "users", s.uid), { motto: m }, { merge: true }).catch(writeErr); },
+    put(id, data) { pending[id] = { data, t: Date.now() }; savePending(); refreshMeta(); s.onChange(); flush(); },
+    del(id) { pending[id] = { del: true, t: Date.now() }; savePending(); refreshMeta(); s.onChange(); flush(); },
+    setMotto(m) {
+      s.motto = m; lsSet(key("motto"), m); s.onChange();
+      F.setDoc(F.doc(db, "users", s.uid), { motto: m }, { merge: true }).catch(writeErr);
+    },
   };
+
+  function refreshMeta() { s.meta = { pending: Object.values(pending).some((p) => !p.acked), offline: !navigator.onLine }; }
+
+  function subscribe() {
+    unsub.forEach((u) => u()); unsub = [];
+    const uid = s.uid;
+    unsub.push(F.onSnapshot(F.collection(db, "users", uid, "items"), { includeMetadataChanges: true }, (snap) => {
+      if (snap.metadata.fromCache) return;          // tylko pełny stan z serwera nadpisuje kopię
+      const next = {};
+      snap.forEach((d) => { next[d.id] = d.data(); });
+      server = next; lsSet(key("srv"), server);
+      // Potwierdzona zmiana schodzi z ekranowej nakładki dopiero, gdy stan z serwera naprawdę ją zawiera.
+      // (Na iPhonie połączenie potrafi przysłać stary stan — wtedy nakładka trzyma zadanie na ekranie.)
+      const now = Date.now();
+      for (const [id, p] of Object.entries(pending)) {
+        if (!p.acked) continue;
+        const d = next[id];
+        const seen = p.del ? !d : !!d && (d.updated || 0) >= (p.data.updated || 0);
+        if (seen || now - p.acked > 10 * 60 * 1000) delete pending[id];
+      }
+      savePending(); refreshMeta(); s.onChange();
+    }, (e) => { console.error(e); note("Błąd synchronizacji: " + (e.code || e.message), true); }));
+    unsub.push(F.onSnapshot(F.doc(db, "users", uid), (d) => {
+      if (d.metadata.fromCache) return;
+      const m = (d.exists() && d.data().motto) || DEFAULT_MOTTO;
+      if (m !== s.motto) { s.motto = m; lsSet(key("motto"), m); s.onChange(); }
+    }, () => {}));
+  }
+
+  const inFlight = new Set();
+  function flush() {
+    if (!s.uid) return;
+    for (const [id, p] of Object.entries(pending)) {
+      if (p.acked || inFlight.has(id + p.t)) continue;
+      inFlight.add(id + p.t);
+      const ref = F.doc(db, "users", s.uid, "items", id);
+      (p.del ? F.deleteDoc(ref) : F.setDoc(ref, p.data))
+        .then(() => {
+          // serwer potwierdził: przenosimy zmianę do kopii serwera i zdejmujemy z kolejki (o ile w międzyczasie nie było nowszej)
+          if (pending[id] === p) { p.acked = Date.now(); savePending(); refreshMeta(); s.onChange(); }
+        })
+        .catch((e) => {
+          if (e && (e.code === "permission-denied" || e.code === "invalid-argument")) {
+            if (pending[id] === p) { delete pending[id]; savePending(); refreshMeta(); s.onChange(); }
+            writeErr(e);
+          }
+        })
+        .finally(() => inFlight.delete(id + p.t));
+    }
+  }
+
   return s;
 }
 function writeErr(e) { console.error(e); note("Nie udało się zapisać: " + (e.code || e.message), true); }
