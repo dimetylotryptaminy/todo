@@ -1,7 +1,7 @@
 import { CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v24";
+const APP_VERSION = "v25";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -17,7 +17,7 @@ function trailingEndWord(text) {
 }
 // Podgląd zdarzeń mikrofonu: otwórz adres z „?debug”, np. …/todo/?debug
 const DEBUG = /[?&]debug/.test(location.search);
-const dbgLines = [];
+const dbgLines = (() => { try { return JSON.parse(sessionStorage.getItem("tablica.dbg") || "[]"); } catch { return []; } })();
 function dbg(msg) {
   if (!DEBUG) return;
   const t = new Date().toTimeString().slice(3, 8);
@@ -25,6 +25,7 @@ function dbg(msg) {
   let el = document.getElementById("dbg");
   if (!el) { el = document.createElement("pre"); el.id = "dbg"; document.body.append(el); }
   el.textContent = dbgLines.join("\n");
+  try { sessionStorage.setItem("tablica.dbg", JSON.stringify(dbgLines)); } catch {}
 }
 // Każdy błąd pokazuje się na pasku statusu, żeby było go widać na telefonie (zrzut ekranu = diagnoza).
 window.addEventListener("error", (e) => { try { note("Błąd: " + (e.message || e.error), true); } catch {} });
@@ -586,13 +587,14 @@ if (IOS && !SR) {
         catch (err) { dbg("restart throw " + err.message); stopListening(); note("Mikrofon się nie uruchomił. Stuknij go jeszcze raz.", true); }
         return;
       }
-      if (!listening) return;
+      if (!listening) { if (IOS) reloadForNextRecording(); return; }
       // nagrywanie skończyło się samo (cisza) — zapisujemy to, co padło, i gasimy mikrofon
       clearTimeout(endTimer);
       let left = buffer.trim(); buffer = "";
       const cut = trailingEndWord(left); if (cut >= 0) left = left.slice(0, cut).trim();
       if (left) commit(left);
       stopListening(left ? "" : "Mikrofon wyłączony.");
+      if (IOS) reloadForNextRecording();
     };
     return r;
   }
@@ -697,6 +699,29 @@ document.addEventListener("keydown", (e) => {
   if ((e.key === "m" || e.key === "M") && !$("mic").hidden) { e.preventDefault(); $("mic").click(); }
 });
 
+// iPhone: Safari rozpoznaje mowę tylko RAZ na jedno załadowanie strony (kolejne nagrania: mikrofon włączony, zero tekstu).
+// Dlatego po każdym nagraniu po cichu przeładowujemy stronę (z pamięci telefonu, ułamek sekundy).
+// Zadanie jest już wtedy zapisane w kolejce na urządzeniu, a komunikat i miejsce przewinięcia wracają po przeładowaniu.
+let reloading = false;
+function reloadForNextRecording() {
+  if (reloading) return; reloading = true;
+  dbg("przeładowanie po nagraniu");
+  try {
+    sessionStorage.setItem("tablica.flash", JSON.stringify({ msg: noteMsg, warn: noteWarn }));
+    sessionStorage.setItem("tablica.scroll", String(window.scrollY));
+  } catch {}
+  setTimeout(() => location.reload(), 350);
+}
+function restoreAfterReload() {
+  try {
+    const f = JSON.parse(sessionStorage.getItem("tablica.flash") || "null");
+    const y = Number(sessionStorage.getItem("tablica.scroll") || 0);
+    sessionStorage.removeItem("tablica.flash"); sessionStorage.removeItem("tablica.scroll");
+    if (f && f.msg) note(f.msg, f.warn);
+    if (y) { const go = () => window.scrollTo(0, y); go(); setTimeout(go, 300); setTimeout(go, 1200); }
+  } catch {}
+}
+
 // ---------------- boot ----------------
 buildSheet();
 (async () => {
@@ -706,6 +731,8 @@ buildSheet();
     catch (e) { console.error(e); store = localStore(); note("Nie udało się wczytać synchronizacji (brak internetu przy pierwszym uruchomieniu?). Działam lokalnie.", true); }
   } else store = localStore();
   store.start(render);
+  restoreAfterReload();
+  dbg("załadowano " + APP_VERSION);
 })();
 
 if ("serviceWorker" in navigator) {
