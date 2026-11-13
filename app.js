@@ -1,7 +1,7 @@
 import { CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v13";
+const APP_VERSION = "v14";
 // Każdy błąd pokazuje się na pasku statusu, żeby było go widać na telefonie (zrzut ekranu = diagnoza).
 window.addEventListener("error", (e) => { try { note("Błąd: " + (e.message || e.error), true); } catch {} });
 window.addEventListener("unhandledrejection", (e) => { try { note("Błąd: " + ((e.reason && (e.reason.code || e.reason.message)) || e.reason), true); } catch {} });
@@ -458,12 +458,13 @@ if (IOS && !SR) {
       ? `Słucham… Mów zadanie do ${cat}, na końcu powiedz „koniec”. Kliknij mikrofon, żeby skończyć.`
       : "Słucham… Powiedz np. „dodaj Genomtec wysłać umowę koniec”. Kliknij mikrofon, żeby skończyć.");
     bumpIdle();
-    watchdog = setTimeout(() => {
+    // Licznik „nic nie słyszę” rusza dopiero, gdy mikrofon naprawdę nagrywa (nie w trakcie pytania o zgodę).
+    const armWatchdog = () => watchdog = setTimeout(() => {
       if (listening && !heard) note(IOS
         ? "Nic nie słyszę. Sprawdź: Ustawienia → Ogólne → Klawiatura → Włącz dyktowanie, oraz zgodę na mikrofon dla Safari."
         : "Nic nie słyszę. Sprawdź, czy przeglądarka ma dostęp do mikrofonu (ikona w pasku adresu).", true);
     }, 8000);
-    try { startRec(); } catch { stopListening(); keyboardDictation(); }
+    try { startRec(); rec.onaudiostart = () => { clearTimeout(watchdog); armWatchdog(); }; } catch { stopListening(); keyboardDictation(); }
   }
 
   mic.addEventListener("click", () => toggle(mic, null));
