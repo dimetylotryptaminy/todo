@@ -341,6 +341,15 @@ if (SR) {
   });
 }
 
+// Skróty klawiszowe (komputer): „/” — pole poleceń, „M” — mikrofon. Działają, gdy nie piszesz w polu.
+document.addEventListener("keydown", (e) => {
+  const a = document.activeElement;
+  const typing = a && (a.tagName === "INPUT" || a.isContentEditable);
+  if (typing || e.metaKey || e.ctrlKey || e.altKey || !$("login").hidden) return;
+  if (e.key === "/") { e.preventDefault(); $("cmd").focus(); }
+  if ((e.key === "m" || e.key === "M") && !$("mic").hidden) { e.preventDefault(); $("mic").click(); }
+});
+
 // ---------------- boot ----------------
 buildSheet();
 (async () => {
