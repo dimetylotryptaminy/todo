@@ -1,7 +1,7 @@
 import { CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v29";
+const APP_VERSION = "v30";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -925,6 +925,32 @@ function restoreAfterReload() {
     if (f && f.msg) note(f.msg, f.warn);
     if (y) { const go = () => window.scrollTo(0, y); go(); setTimeout(go, 300); setTimeout(go, 1200); }
   } catch {}
+}
+
+// Przycisk „Odśwież aplikację”: czyści zapamiętane pliki aplikacji i ładuje najnowszą wersję z serwera.
+// Zadania zostają (są na koncie i w pamięci urządzenia), czyścimy tylko kopię plików aplikacji.
+$("ver").textContent = "Wersja " + APP_VERSION;
+$("refreshApp").addEventListener("click", async () => {
+  const b = $("refreshApp");
+  b.classList.add("busy"); b.disabled = true;
+  try {
+    if ("serviceWorker" in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.update().catch(() => {})));
+    }
+    if (window.caches) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } catch {}
+  const url = new URL(location.href);
+  url.searchParams.set("v", Date.now().toString(36));   // omija pamięć podręczną przeglądarki
+  location.replace(url.toString());
+});
+// po odświeżeniu usuwamy znacznik z adresu (zostaje np. ?debug)
+if (new URL(location.href).searchParams.has("v")) {
+  const u = new URL(location.href); u.searchParams.delete("v");
+  history.replaceState(null, "", u.pathname + (u.search ? u.search : "") + u.hash);
 }
 
 // ---------------- boot ----------------
