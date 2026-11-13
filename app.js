@@ -1,7 +1,7 @@
 import { CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v10";
+const APP_VERSION = "v11";
 // Każdy błąd pokazuje się na pasku statusu, żeby było go widać na telefonie (zrzut ekranu = diagnoza).
 window.addEventListener("error", (e) => { try { note("Błąd: " + (e.message || e.error), true); } catch {} });
 window.addEventListener("unhandledrejection", (e) => { try { note("Błąd: " + ((e.reason && (e.reason.code || e.reason.message)) || e.reason), true); } catch {} });
@@ -427,17 +427,26 @@ $("cmd").addEventListener("input", () => {
   if (cmdText) run(cmdText);
 });
 
-// iPhone: gdy otwiera się klawiatura, pasek poleceń przesuwa się nad nią.
+// iPhone: gdy otwiera się klawiatura, pasek poleceń ma stać tuż nad nią (mierzymy, o ile ją zasłania, i tylko tyle przesuwamy).
 if (window.visualViewport) {
   const bar = document.querySelector(".top");
   const fit = () => {
     const vv = window.visualViewport;
-    const hidden = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-    bar.style.transform = hidden > 0 ? `translateY(-${hidden}px)` : "";
+    bar.style.transform = "";
+    const overlap = bar.getBoundingClientRect().bottom - (vv.offsetTop + vv.height);
+    if (overlap > 1) bar.style.transform = `translateY(-${Math.round(overlap)}px)`;
   };
   visualViewport.addEventListener("resize", fit);
   visualViewport.addEventListener("scroll", fit);
 }
+
+// Dyktowanie z klawiatury iOS nie zawsze zgłasza zmiany tekstu na bieżąco — dopóki pole jest aktywne, sprawdzamy je co pół sekundy.
+let kTimer = null;
+$("cmd").addEventListener("focus", () => {
+  clearInterval(kTimer);
+  kTimer = setInterval(() => { if (/(^|\s)koniec/i.test($("cmd").value)) $("cmd").dispatchEvent(new Event("input")); }, 500);
+});
+$("cmd").addEventListener("blur", () => { clearInterval(kTimer); if (/(^|\s)koniec/i.test($("cmd").value)) $("cmd").dispatchEvent(new Event("input")); });
 
 // Skróty klawiszowe (komputer): „/” — pole poleceń, „M” — mikrofon. Działają, gdy nie piszesz w polu.
 document.addEventListener("keydown", (e) => {
