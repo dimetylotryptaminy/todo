@@ -130,6 +130,14 @@ li.done .txt { color: var(--done); text-decoration: line-through; }
   background: var(--paper); color: var(--ink);
 }
 .login-card input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.google {
+  display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px;
+  border: 1px solid var(--hair); border-radius: 10px; background: var(--paper); color: var(--ink); font-weight: 500;
+}
+.google svg { width: 18px; height: 18px; }
+.google:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.or { display: flex; align-items: center; gap: 10px; color: var(--ink-soft); font-size: 12px; margin: 6px 0 2px; }
+.or::before, .or::after { content: ""; flex: 1; border-top: 1px solid var(--hair); }
 .login-err { color: var(--warn) !important; min-height: 1.2em; }
 .login-actions { display: flex; justify-content: space-between; align-items: center; }
 

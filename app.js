@@ -87,8 +87,25 @@ const AUTH_ERR = {
   "auth/invalid-email": "Nieprawidłowy adres e-mail.",
   "auth/network-request-failed": "Brak internetu. Pierwsze logowanie wymaga połączenia.",
   "auth/too-many-requests": "Za dużo prób. Spróbuj za kilka minut.",
-  "auth/operation-not-allowed": "Logowanie e-mailem nie jest włączone w Firebase (Authentication → Email/Password).",
+  "auth/operation-not-allowed": "Ten sposób logowania nie jest włączony w Firebase (Authentication → Sign-in method).",
+  "auth/popup-blocked": "Przeglądarka zablokowała okienko logowania. Zezwól na wyskakujące okna albo zaloguj się e-mailem.",
+  "auth/popup-closed-by-user": "Okienko logowania zostało zamknięte.",
+  "auth/cancelled-popup-request": "Okienko logowania zostało zamknięte.",
+  "auth/unauthorized-domain": "Ta domena nie jest dodana w Firebase (Authentication → Settings → Authorized domains).",
+  "auth/account-exists-with-different-credential": "Na ten adres jest już konto z hasłem. Zaloguj się e-mailem i hasłem.",
 };
+$("google").addEventListener("click", async () => {
+  $("loginErr").textContent = "";
+  try {
+    const provider = new store.A.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+    await store.A.signInWithPopup(store.auth, provider);
+  } catch (e) {
+    const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
+    $("loginErr").textContent = (AUTH_ERR[e.code] || "Nie udało się: " + (e.code || e.message)) +
+      (standalone && !AUTH_ERR[e.code] ? " Na iPhonie w aplikacji z ikony zaloguj się e-mailem." : "");
+  }
+});
 async function doAuth(create) {
   const email = $("email").value.trim(), pass = $("password").value;
   if (!email || pass.length < 6) { $("loginErr").textContent = "Podaj e-mail i hasło (min. 6 znaków)."; return; }
