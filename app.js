@@ -1,7 +1,7 @@
 import { CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v19";
+const APP_VERSION = "v20";
 // Podgląd zdarzeń mikrofonu: otwórz adres z „?debug”, np. …/todo/?debug
 const DEBUG = /[?&]debug/.test(location.search);
 const dbgLines = [];
@@ -497,11 +497,26 @@ if (IOS && !SR) {
   // Nie polegamy na „isFinal”: Safari na iPhonie potrafi nigdy nie oznaczyć wyniku jako ostatecznego.
   let consumed = 0, lastFull = "", restartTimer = null; // restartTimer: zostawiony dla zgodności
 
+  // „koniec” rozpoznane z tolerancją na błędy rozpoznawania mowy („Koniec.”, „końca”, „konieć”, „konie c”…).
+  function findEnd(text) {
+    const re = /[^\s.,!?;:]+/g; let t;
+    const words = [];
+    while ((t = re.exec(text))) words.push({ w: t[0], i: t.index, n: norm(t[0]) });
+    for (let k = 0; k < words.length; k++) {
+      const n = words[k].n;
+      const two = k + 1 < words.length ? n + words[k + 1].n : "";
+      const hit = (x) => x === "koniec" || x === "konca" || x === "koniecz" || x === "koniecc" || (x.length >= 6 && x.length <= 7 && x.startsWith("konie") && x !== "koniem");
+      if (hit(n)) { const end = words[k].i + words[k].w.length; return { index: words[k].i, 0: text.slice(words[k].i, end + (text.slice(end).match(/^[\s.,!?;:]*/)[0].length)) }; }
+      if (two && (two === "koniec" || two === "konca")) { const w2 = words[k + 1]; return { index: words[k].i, 0: text.slice(words[k].i, w2.i + w2.w.length) }; }
+    }
+    return null;
+  }
+
   function onTranscript(full) {
     lastFull = full;
     let pendingText = full.slice(consumed);
     if (CANCEL.test(pendingText)) { consumed = full.length; buffer = ""; stopListening("Anulowano."); return; }
-    const m = pendingText.match(END);
+    const m = findEnd(pendingText);
     if (m) {
       // „koniec” = zapisz i wyłącz mikrofon (jedno stuknięcie, jedno zadanie)
       const text = pendingText.slice(0, m.index).trim();
