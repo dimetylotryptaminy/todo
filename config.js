@@ -1,4 +1,10 @@
 // Konfiguracja Firebase (synchronizacja między urządzeniami).
-// Wklej tu obiekt z Firebase Console → Project settings → Your apps → SDK setup and configuration.
-// Dopóki jest null, aplikacja działa lokalnie (offline) tylko na tym urządzeniu.
-window.FIREBASE_CONFIG = null;
+// To nie jest tajne hasło — dane chronią reguły Firestore (firestore.rules).
+window.FIREBASE_CONFIG = {
+  apiKey: "AIzaSyBkrOGuCUsB_FTl1ykqEWlvLKt_ADQZfpQ",
+  authDomain: "todo-5e064.firebaseapp.com",
+  projectId: "todo-5e064",
+  storageBucket: "todo-5e064.firebasestorage.app",
+  messagingSenderId: "565869103462",
+  appId: "1:565869103462:web:c3900152321b1bc7b3a0a7",
+};
