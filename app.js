@@ -1,7 +1,7 @@
 import { CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v9";
+const APP_VERSION = "v10";
 // Każdy błąd pokazuje się na pasku statusu, żeby było go widać na telefonie (zrzut ekranu = diagnoza).
 window.addEventListener("error", (e) => { try { note("Błąd: " + (e.message || e.error), true); } catch {} });
 window.addEventListener("unhandledrejection", (e) => { try { note("Błąd: " + ((e.reason && (e.reason.code || e.reason.message)) || e.reason), true); } catch {} });
@@ -326,8 +326,19 @@ function keyboardDictation(msg) {
 }
 $("cmd").addEventListener("blur", () => { dictating = false; });
 
-if (IOS || !SR) {
-  mic.addEventListener("click", () => keyboardDictation(SR || IOS ? null : "Ta przeglądarka nie rozpoznaje mowy. Użyj dyktowania systemowego (na Macu: dwa razy Fn)."));
+if (IOS) {
+  // iOS otwiera klawiaturę tylko po prawdziwym stuknięciu w pole (programowe focus() bywa ignorowane, np. w Chrome).
+  // Dlatego przycisk mikrofonu na iOS to <label for="cmd">: stuknięcie w niego to dla iOS stuknięcie w pole.
+  const label = document.createElement("label");
+  label.htmlFor = "cmd"; label.className = "mic"; label.id = "mic";
+  label.setAttribute("aria-label", "Dyktuj polecenie");
+  label.innerHTML = mic.innerHTML;
+  mic.replaceWith(label);
+  $("cmd").addEventListener("focus", () => {
+    note("Stuknij 🎤 na klawiaturze i mów, np. „dodaj Genomtec wysłać umowę koniec”. Po słowie „koniec” zadanie zapisze się samo.");
+  });
+} else if (!SR) {
+  mic.addEventListener("click", () => keyboardDictation("Ta przeglądarka nie rozpoznaje mowy. Użyj dyktowania systemowego (na Macu: dwa razy Fn)."));
 } else {
   // Tryb dyktowania (komputer): mikrofon słucha ciągle. Mówisz „dodaj Genomtec … koniec” — zadanie zapisuje się
   // po słowie „koniec”, a mikrofon słucha dalej, aż klikniesz go ponownie (albo powiesz „stop”).
