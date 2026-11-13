@@ -1,7 +1,7 @@
 import { CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v22";
+const APP_VERSION = "v23";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -535,14 +535,24 @@ if (IOS && !SR) {
     if (listening) show();
   }
 
-  function startRec() {
-    const r = rec = new SR();
-    consumed = 0; lastFull = "";
+  // Jeden obiekt rozpoznawania mowy na całą wizytę. Safari na iPhonie po pierwszym użyciu po cichu ignoruje
+  // NOWE obiekty (działało tylko za pierwszym razem) — dlatego używamy ciągle tego samego i uruchamiamy go ponownie
+  // dopiero, gdy poprzednie nagrywanie naprawdę się zakończy (zdarzenie „end”).
+  let recog = null, active = false, wantStart = false, sessionReady = false;
+  const armWatchdog = () => { clearTimeout(watchdog); watchdog = setTimeout(() => {
+    if (listening && !heard) note(IOS
+      ? "Nic nie słyszę. Sprawdź: Ustawienia → Ogólne → Klawiatura → Włącz dyktowanie, oraz zgodę na mikrofon dla Safari."
+      : "Nic nie słyszę. Sprawdź, czy przeglądarka ma dostęp do mikrofonu (ikona w pasku adresu).", true);
+  }, 8000); };
+
+  function ensureRecog() {
+    if (recog) return recog;
+    const r = recog = new SR();
     r.lang = "pl-PL"; r.interimResults = true; r.continuous = true; r.maxAlternatives = 1;
-    r.onstart = () => dbg("start");
-    r.onaudiostart = () => dbg("audiostart");
+    r.onstart = () => { active = true; sessionReady = true; dbg("start"); };
+    r.onaudiostart = () => { dbg("audiostart"); if (listening) armWatchdog(); };
     r.onresult = (e) => {
-      if (r !== rec || !listening) return;   // wyniki po wyłączeniu (lub ze starego nagrywania) ignorujemy
+      if (!listening || !sessionReady) return;   // wyniki poprzedniego nagrywania ignorujemy
       heard = true; bumpIdle();
       const full = Array.from(e.results).map((x) => x[0].transcript.trim()).join(" ").replace(/\s+/g, " ");
       dbg("result " + (e.results[e.results.length - 1].isFinal ? "F" : "i") + " #" + e.results.length + ": " + full.slice(-60));
@@ -550,7 +560,7 @@ if (IOS && !SR) {
     };
     r.onerror = (e) => {
       dbg("error " + e.error);
-      if (r !== rec) return;
+      if (!listening || wantStart) return;
       const m = {
         "not-allowed": IOS
           ? "Brak zgody na mikrofon. Ustawienia → Safari → Mikrofon → Zezwalaj (albo „aA” w pasku adresu → Ustawienia witryny)."
@@ -563,18 +573,32 @@ if (IOS && !SR) {
       }[e.error];
       if (m) { note(m, true); stopListening(); }
     };
-    // Przeglądarka sama zakończyła nagrywanie (np. po ciszy), zanim padło „koniec”:
-    // zapisujemy to, co zostało powiedziane, i wyłączamy mikrofon — bez prób wznawiania.
     r.onend = () => {
-      dbg("end");
-      if (r !== rec || !listening) return;
+      active = false; sessionReady = false; dbg("end" + (wantStart ? " → start" : ""));
+      if (wantStart) {
+        wantStart = false;
+        if (!listening) return;
+        try { r.start(); active = true; }
+        catch (err) { dbg("restart throw " + err.message); stopListening(); note("Mikrofon się nie uruchomił. Stuknij go jeszcze raz.", true); }
+        return;
+      }
+      if (!listening) return;
+      // nagrywanie skończyło się samo (cisza) — zapisujemy to, co padło, i gasimy mikrofon
       clearTimeout(endTimer);
       let left = buffer.trim(); buffer = "";
       const cut = trailingEndWord(left); if (cut >= 0) left = left.slice(0, cut).trim();
       if (left) commit(left);
       stopListening(left ? "" : "Mikrofon wyłączony.");
     };
-    r.start();
+    return r;
+  }
+
+  function startRec() {
+    const r = rec = ensureRecog();
+    consumed = 0; lastFull = ""; sessionReady = false;
+    if (active) { wantStart = true; dbg("czekam na koniec poprzedniego"); try { r.abort(); } catch {} return; }
+    try { r.start(); active = true; dbg("start()"); }
+    catch (err) { dbg("start throw " + err.message); wantStart = true; try { r.abort(); } catch {} }
   }
 
   function toggle(btn, cat) {
@@ -601,13 +625,7 @@ if (IOS && !SR) {
       ? `Słucham… Mów zadanie do ${cat}, na końcu powiedz „zapisz”.`
       : "Słucham… Powiedz np. „dodaj Genomtec wysłać umowę zapisz”.");
     bumpIdle();
-    // Licznik „nic nie słyszę” rusza dopiero, gdy mikrofon naprawdę nagrywa (nie w trakcie pytania o zgodę).
-    const armWatchdog = () => watchdog = setTimeout(() => {
-      if (listening && !heard) note(IOS
-        ? "Nic nie słyszę. Sprawdź: Ustawienia → Ogólne → Klawiatura → Włącz dyktowanie, oraz zgodę na mikrofon dla Safari."
-        : "Nic nie słyszę. Sprawdź, czy przeglądarka ma dostęp do mikrofonu (ikona w pasku adresu).", true);
-    }, 8000);
-    try { startRec(); rec.onaudiostart = () => { clearTimeout(watchdog); armWatchdog(); }; } catch { stopListening(); keyboardDictation(); }
+    try { startRec(); } catch { stopListening(); keyboardDictation(); }
   }
 
   mic.addEventListener("click", () => toggle(mic, null));
