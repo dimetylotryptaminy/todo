@@ -168,3 +168,13 @@ li.done .txt { color: var(--done); text-decoration: line-through; }
 }
 @media (prefers-reduced-motion: reduce) { .box li.flash, .mic.on { animation: none; } }
 .box.target { background: color-mix(in srgb, var(--accent) 10%, var(--paper)); box-shadow: inset 0 0 0 2px var(--accent); }
+.box h2 .hright { display: flex; align-items: center; gap: 8px; }
+.boxmic {
+  width: 36px; height: 36px; margin: -8px -8px -8px 0; border-radius: 50%; border: 1px solid var(--hair);
+  background: var(--paper); color: var(--accent); display: grid; place-items: center; padding: 0; cursor: pointer; flex: none;
+}
+.boxmic svg { width: 18px; height: 18px; }
+.boxmic:hover { border-color: var(--accent); }
+.boxmic:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.boxmic.on { background: var(--warn); border-color: var(--warn); color: var(--paper); animation: pulse 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .boxmic.on { animation: none; } }

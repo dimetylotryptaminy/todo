@@ -1,7 +1,7 @@
 import { CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v12";
+const APP_VERSION = "v13";
 // Każdy błąd pokazuje się na pasku statusu, żeby było go widać na telefonie (zrzut ekranu = diagnoza).
 window.addEventListener("error", (e) => { try { note("Błąd: " + (e.message || e.error), true); } catch {} });
 window.addEventListener("unhandledrejection", (e) => { try { note("Błąd: " + ((e.reason && (e.reason.code || e.reason.message)) || e.reason), true); } catch {} });
@@ -159,7 +159,9 @@ function buildSheet() {
     const h = document.createElement("h2");
     const name = document.createElement("span"); name.textContent = cat;
     const n = document.createElement("span"); n.className = "n";
-    h.append(name, n);
+    const right = document.createElement("span"); right.className = "hright";
+    right.append(n, boxMic(cat));
+    h.append(name, right);
     const ul = document.createElement("ul");
     const add = document.createElement("input");
     add.className = "add"; add.type = "text"; add.id = "add-" + cat.toLowerCase();
@@ -188,6 +190,18 @@ function buildSheet() {
   });
   foot.append(wk, m);
   sheet.append(foot);
+}
+
+const micSvg = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Z" fill="currentColor"/><path d="M18 11.5a6 6 0 0 1-12 0M12 17.5V21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+// Mikrofon w rogu pola spółki. Bez rozpoznawania mowy na iOS: etykieta pola „+ dodaj zadanie” (otwiera klawiaturę z dyktowaniem).
+function boxMic(cat) {
+  const noSR = !(window.SpeechRecognition || window.webkitSpeechRecognition);
+  const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const el = document.createElement(noSR && isIOS ? "label" : "button");
+  if (el.tagName === "LABEL") el.htmlFor = "add-" + cat.toLowerCase(); else el.type = "button";
+  el.className = "boxmic"; el.dataset.cat = cat; el.innerHTML = micSvg;
+  el.setAttribute("aria-label", "Dyktuj zadanie do " + cat);
+  return el;
 }
 
 function itemEl(t) {
@@ -340,29 +354,53 @@ if (IOS && !SR) {
 } else if (!SR) {
   mic.addEventListener("click", () => keyboardDictation("Ta przeglądarka nie rozpoznaje mowy. Użyj dyktowania systemowego (na Macu: dwa razy Fn)."));
 } else {
-  // Tryb dyktowania (komputer): mikrofon słucha ciągle. Mówisz „dodaj Genomtec … koniec” — zadanie zapisuje się
-  // po słowie „koniec”, a mikrofon słucha dalej, aż klikniesz go ponownie (albo powiesz „stop”).
+  // Tryb dyktowania. Dwa wejścia:
+  //  • mikrofon na dole — polecenia: „dodaj Genomtec wysłać umowę koniec”,
+  //  • mikrofon w rogu pola spółki — samo zadanie: „wysłać umowę koniec” trafia prosto do tego pola.
+  // Po „koniec” zadanie się zapisuje, a mikrofon słucha dalej, aż klikniesz go ponownie (albo powiesz „stop”).
   let rec = null, listening = false, buffer = "", heard = false, watchdog = null, idle = null;
+  let targetCat = null, activeBtn = null;
   const END = /(^|\s)koniec([\s.,!?]|$)/i;
   const STOP = /^\s*(stop|zakończ nagrywanie|wyłącz mikrofon)[\s.,!?]*$/i;
   const CANCEL = /(^|\s)anuluj([\s.,!?]|$)/i;
+  const clearTargets = () => document.querySelectorAll(".box.target").forEach((b) => b.classList.remove("target"));
 
   const setTarget = (text) => {
-    document.querySelectorAll(".box.target").forEach((b) => b.classList.remove("target"));
+    clearTargets();
+    if (targetCat) { $("box-" + targetCat.toLowerCase()).classList.add("target"); return; }
     const m = norm(text).match(/^(dodaj|dopisz|wpisz|zapisz)\s+(?:do\s+)?(.+)/);
     if (!m) return;
     const cat = catOf(m[2]);
     if (cat) $("box-" + cat.toLowerCase()).classList.add("target");
   };
-  const show = (interim = "") => { const t = (buffer + " " + interim).trim(); $("cmd").value = t; setTarget(t); };
+  const field = () => targetCat ? $("add-" + targetCat.toLowerCase()) : $("cmd");
+  const show = (interim = "") => { const t = (buffer + " " + interim).trim(); field().value = t; setTarget(t); };
+
+  function addToTarget(text) {
+    const t = text.replace(/^[\s:,\-–—]+|[\s,.;:\-–—]+$/g, "");
+    if (!t) return;
+    const textCap = t.charAt(0).toUpperCase() + t.slice(1);
+    const id = newId(); flashId = id;
+    write(id, { type: "todo", cat: targetCat, text: textCap, done: false, created: Date.now(), updated: Date.now() });
+    lastUndo = [[id, null]];
+    note(`Dodano do ${targetCat}: ${textCap}`, false, true);
+  }
+  function commit(text) {
+    if (targetCat) addToTarget(text);
+    else { $("cmd").value = text; run(text); }
+  }
 
   function stopListening(msg) {
     listening = false; clearTimeout(watchdog); clearTimeout(idle);
     if (rec) { try { rec.stop(); } catch {} }
-    mic.classList.remove("on"); mic.setAttribute("aria-label", "Włącz mikrofon");
-    document.querySelectorAll(".box.target").forEach((b) => b.classList.remove("target"));
-    if (buffer.trim()) note("Mikrofon wyłączony. Niezapisany tekst jest w polu — powiedz „koniec” następnym razem albo wciśnij Enter.", true);
+    if (activeBtn) { activeBtn.classList.remove("on"); activeBtn.setAttribute("aria-label", activeBtn === mic ? "Włącz mikrofon" : "Dyktuj zadanie do " + targetCat); }
+    clearTargets();
+    const left = buffer.trim();
+    if (left && targetCat) { addToTarget(left); field().value = ""; }       // w polu spółki zapisujemy też to, co bez „koniec”
+    else if (left) note("Mikrofon wyłączony. Niezapisany tekst jest w polu — dokończ i wciśnij Enter.", true);
     else if (msg) note(msg);
+    if (targetCat) field().value = "";
+    buffer = ""; activeBtn = null; targetCat = null;
   }
   const bumpIdle = () => { clearTimeout(idle); idle = setTimeout(() => stopListening("Mikrofon wyłączył się po minucie ciszy."), 60000); };
 
@@ -370,11 +408,11 @@ if (IOS && !SR) {
     if (CANCEL.test(buffer)) { buffer = ""; show(); note("Anulowano."); return; }
     let m;
     while ((m = buffer.match(END))) {
-      const cmdText = buffer.slice(0, m.index).trim();
+      const text = buffer.slice(0, m.index).trim();
       buffer = buffer.slice(m.index + m[0].length).trim();
-      if (cmdText) { $("cmd").value = cmdText; run(cmdText); }
+      if (text) commit(text);
     }
-    if (STOP.test(buffer)) { buffer = buffer.replace(STOP, " ").trim(); stopListening("Mikrofon wyłączony."); }
+    if (STOP.test(buffer)) { buffer = ""; stopListening("Mikrofon wyłączony."); }
   }
 
   function startRec() {
@@ -407,11 +445,18 @@ if (IOS && !SR) {
     rec.start();
   }
 
-  mic.addEventListener("click", () => {
-    if (listening) { stopListening("Mikrofon wyłączony."); return; }
-    listening = true; buffer = ""; heard = false;
-    mic.classList.add("on"); mic.setAttribute("aria-label", "Wyłącz mikrofon");
-    note("Słucham… Powiedz np. „dodaj Genomtec wysłać umowę koniec”. Kliknij mikrofon, żeby skończyć.");
+  function toggle(btn, cat) {
+    if (listening) {
+      const same = btn === activeBtn;
+      stopListening("Mikrofon wyłączony.");
+      if (same) return;                     // ten sam przycisk = wyłącz; inny = przełącz na nowe pole
+    }
+    listening = true; buffer = ""; heard = false; targetCat = cat; activeBtn = btn;
+    btn.classList.add("on"); btn.setAttribute("aria-label", "Wyłącz mikrofon");
+    setTarget("");
+    note(cat
+      ? `Słucham… Mów zadanie do ${cat}, na końcu powiedz „koniec”. Kliknij mikrofon, żeby skończyć.`
+      : "Słucham… Powiedz np. „dodaj Genomtec wysłać umowę koniec”. Kliknij mikrofon, żeby skończyć.");
     bumpIdle();
     watchdog = setTimeout(() => {
       if (listening && !heard) note(IOS
@@ -419,6 +464,12 @@ if (IOS && !SR) {
         : "Nic nie słyszę. Sprawdź, czy przeglądarka ma dostęp do mikrofonu (ikona w pasku adresu).", true);
     }, 8000);
     try { startRec(); } catch { stopListening(); keyboardDictation(); }
+  }
+
+  mic.addEventListener("click", () => toggle(mic, null));
+  sheet.addEventListener("click", (e) => {
+    const b = e.target.closest(".boxmic");
+    if (b) toggle(b, b.dataset.cat);
   });
 }
 
