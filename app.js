@@ -1,7 +1,8 @@
 import { parse, norm, catOf } from "./parser.js";
+import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v51";
+const APP_VERSION = "v52";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -1443,25 +1444,104 @@ $("evDelete").addEventListener("click", () => {
   closeEventDialog();
 });
 
-// ---------- zakładki ZADANIA / KALENDARZ ----------
-let view = location.hash === "#kalendarz" ? "calendar" : lsGet("view", "tasks");
+// ======================= SŁÓWKO NA DZIŚ =======================
+// Codziennie jedno słowo po hiszpańsku i jedno po angielsku (z przykładem i tłumaczeniem). Wybór zależy od daty,
+// więc na telefonie i komputerze jest to samo słowo. Strzałkami można cofnąć się do wcześniejszych dni.
+let wordsOffset = 0;   // 0 = dziś, -1 = wczoraj …
+const dayNo = (d) => Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 864e5);
+const WEEKDAYS_FULL = ["niedziela", "poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota"];
+
+function speak(text, lang) {
+  if (!("speechSynthesis" in window)) { note("To urządzenie nie potrafi czytać na głos.", true); return; }
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = lang; u.rate = 0.9;
+  const v = speechSynthesis.getVoices().find((x) => x.lang && x.lang.replace("_", "-").toLowerCase().startsWith(lang.slice(0, 2)) && x.lang.toLowerCase().includes(lang.slice(3).toLowerCase()))
+    || speechSynthesis.getVoices().find((x) => x.lang && x.lang.toLowerCase().startsWith(lang.slice(0, 2)));
+  if (v) u.voice = v;
+  speechSynthesis.speak(u);
+}
+const speakerSvg = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+
+function wordCard(code, langName, ttsLang, entry) {
+  const [word, meaning, example, exPl] = entry;
+  const card = document.createElement("article"); card.className = "wcard " + code;
+  const top = document.createElement("div"); top.className = "wc-top";
+  const tag = document.createElement("b"); tag.className = "htag " + code; tag.textContent = code.toUpperCase();
+  const ln = document.createElement("span"); ln.className = "wc-lang"; ln.textContent = langName;
+  top.append(tag, ln);
+  const say = (text, label) => {
+    const b = document.createElement("button"); b.type = "button"; b.className = "say"; b.innerHTML = speakerSvg;
+    b.setAttribute("aria-label", label); b.title = label;
+    b.addEventListener("click", () => speak(text, ttsLang));
+    return b;
+  };
+  const wrow = document.createElement("div"); wrow.className = "wc-word";
+  const w = document.createElement("h3"); w.textContent = word; w.lang = ttsLang;
+  wrow.append(w, say(word, "Odsłuchaj słowo"));
+  const mean = document.createElement("p"); mean.className = "wc-mean"; mean.textContent = meaning;
+  const ex = document.createElement("div"); ex.className = "wc-ex";
+  const exT = document.createElement("p"); exT.className = "wc-sent"; exT.textContent = example; exT.lang = ttsLang;
+  ex.append(exT, say(example, "Odsłuchaj zdanie"));
+  const tr = document.createElement("p"); tr.className = "wc-tr"; tr.textContent = exPl;
+  card.append(top, wrow, mean, ex, tr);
+  return card;
+}
+
+function renderWords() {
+  const root = $("words");
+  const d = new Date(); d.setDate(d.getDate() + wordsOffset);
+  const n = dayNo(d);
+  const es = ES_WORDS[((n % ES_WORDS.length) + ES_WORDS.length) % ES_WORDS.length];
+  const en = EN_WORDS[(((n * 37 + 11) % EN_WORDS.length) + EN_WORDS.length) % EN_WORDS.length];
+
+  const head = document.createElement("div"); head.className = "words-head";
+  const prev = document.createElement("button"); prev.type = "button"; prev.className = "yearbtn"; prev.textContent = "‹"; prev.setAttribute("aria-label", "Poprzedni dzień");
+  prev.addEventListener("click", () => { wordsOffset--; renderWords(); });
+  const next = document.createElement("button"); next.type = "button"; next.className = "yearbtn"; next.textContent = "›"; next.setAttribute("aria-label", "Następny dzień");
+  next.disabled = wordsOffset >= 0;
+  next.addEventListener("click", () => { if (wordsOffset < 0) { wordsOffset++; renderWords(); } });
+  const title = document.createElement("div"); title.className = "words-date";
+  const t1 = document.createElement("h2"); t1.textContent = wordsOffset === 0 ? "Słówko na dziś" : wordsOffset === -1 ? "Słówko z wczoraj" : "Słówko sprzed " + (-wordsOffset) + " dni";
+  const t2 = document.createElement("p"); t2.textContent = WEEKDAYS_FULL[d.getDay()] + ", " + d.getDate() + " " + MONTHS_GEN[d.getMonth()] + " " + d.getFullYear();
+  title.append(t1, t2);
+  head.append(prev, title, next);
+  const cards = document.createElement("div"); cards.className = "wcards";
+  cards.append(wordCard("es", "hiszpański", "es-ES", es), wordCard("en", "angielski", "en-GB", en));
+  const nodes = [head, cards];
+  if (wordsOffset !== 0) {
+    const back = document.createElement("button"); back.type = "button"; back.className = "ghost words-today"; back.textContent = "Wróć do dzisiejszego słówka";
+    back.addEventListener("click", () => { wordsOffset = 0; renderWords(); });
+    nodes.push(back);
+  }
+  root.replaceChildren(...nodes);
+}
+
+// ---------- zakładki ZADANIA / KALENDARZ / SŁÓWKO NA DZIŚ ----------
+const VIEWS = { tasks: { tab: "tabTasks", el: "sheet", hash: "" }, calendar: { tab: "tabCal", el: "calendar", hash: "#kalendarz" }, words: { tab: "tabWords", el: "words", hash: "#slowko" } };
+let view = location.hash === "#kalendarz" ? "calendar" : location.hash === "#slowko" ? "words" : lsGet("view", "tasks");
+if (!VIEWS[view]) view = "tasks";
 function setView(v) {
   view = v; lsSet("view", v);
-  history.replaceState(null, "", location.pathname + location.search + (v === "calendar" ? "#kalendarz" : ""));
+  history.replaceState(null, "", location.pathname + location.search + VIEWS[v].hash);
   applyView();
 }
 function applyView() {
-  const cal = view === "calendar";
-  $("sheet").hidden = cal; $("calendar").hidden = !cal;
-  document.body.classList.toggle("view-calendar", cal);
-  $("tabTasks").setAttribute("aria-selected", String(!cal)); $("tabCal").setAttribute("aria-selected", String(cal));
-  $("tabTasks").classList.toggle("active", !cal); $("tabCal").classList.toggle("active", cal);
-  if (cal && store) renderCalendar();
+  for (const [k, v] of Object.entries(VIEWS)) {
+    const on = k === view;
+    $(v.el).hidden = !on;
+    $(v.tab).setAttribute("aria-selected", String(on));
+    $(v.tab).classList.toggle("active", on);
+  }
+  document.body.classList.toggle("view-calendar", view === "calendar");
+  document.body.classList.toggle("view-words", view === "words");
+  if (view === "calendar" && store) renderCalendar();
+  if (view === "words") renderWords();
 }
 $("tabTasks").addEventListener("click", () => setView("tasks"));
 $("tabCal").addEventListener("click", () => setView("calendar"));
+$("tabWords").addEventListener("click", () => setView("words"));
 applyView();
-
 // ---------------- boot ----------------
 buildSheet();
 window.__booted = true;   // strażnik w index.html: aplikacja wystartowała
