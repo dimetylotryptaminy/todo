@@ -56,17 +56,23 @@
     <nav class="taskbar" id="taskbar" aria-label="Zminimalizowane pola" hidden></nav>
   </header>
 
-  <nav class="tabs" role="tablist" aria-label="Widok">
-    <button class="tab" id="tabTasks" role="tab" type="button" aria-controls="sheet">
-      <span class="lbl"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6l2 2 3-3M4 13l2 2 3-3M12 7h8M12 14h8M12 20h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Zadania</span>
-    </button>
-    <button class="tab" id="tabCal" role="tab" type="button" aria-controls="calendar">
-      <span class="lbl"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 10h17M8 3v4M16 3v4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Kalendarz</span>
-    </button>
-    <button class="tab" id="tabWords" role="tab" type="button" aria-controls="words" aria-label="Słówko na dziś">
-      <span class="lbl"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H10l-4 4v-4h-.5A1.5 1.5 0 0 1 4 14.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8 9h8M8 12h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span class="long">Słówko na dziś</span><span class="short">Słówko</span></span>
-    </button>
-  </nav>
+  <div class="topline">
+    <nav class="tabs" role="tablist" aria-label="Widok">
+      <button class="tab" id="tabTasks" role="tab" type="button" aria-controls="sheet">
+        <span class="lbl"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6l2 2 3-3M4 13l2 2 3-3M12 7h8M12 14h8M12 20h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Zadania</span>
+      </button>
+      <button class="tab" id="tabCal" role="tab" type="button" aria-controls="calendar">
+        <span class="lbl"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 10h17M8 3v4M16 3v4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Kalendarz</span>
+      </button>
+      <button class="tab" id="tabWords" role="tab" type="button" aria-controls="words" aria-label="Słówko na dziś">
+        <span class="lbl"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H10l-4 4v-4h-.5A1.5 1.5 0 0 1 4 14.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8 9h8M8 12h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span class="long">Słówko na dziś</span><span class="short">Słówko</span></span>
+      </button>
+    </nav>
+    <div class="topinfo" id="topinfo" aria-live="off">
+      <span class="ti-motto" id="tiMotto"></span>
+      <span class="ti-date" id="tiDate"></span>
+    </div>
+  </div>
   <main class="sheet" id="sheet"></main>
   <section class="cal" id="calendar" hidden aria-label="Kalendarz roczny"></section>
   <section class="cal words" id="words" hidden aria-label="Słówko na dziś"></section>

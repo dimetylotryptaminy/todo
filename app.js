@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v61";
+const APP_VERSION = "v62";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -810,6 +810,10 @@ function renderInner() {
   wk.textContent = w.week + "/" + w.total;
   const s = document.createElement("small"); s.textContent = w.range + " · " + APP_VERSION + (store.meta.local ? " · lokalnie" : store.email ? " · " + store.email : ""); wk.append(s);
   $("motto").textContent = store.motto;
+  // pasek u góry (komputer): motto, dzisiejsza data i numer tygodnia
+  const now = new Date();
+  $("tiMotto").textContent = store.motto;
+  $("tiDate").textContent = WEEKDAYS_FULL[now.getDay()] + ", " + now.getDate() + " " + MONTHS_GEN[now.getMonth()] + " " + now.getFullYear() + " · tydzień " + w.week + "/" + w.total;
   if (view === "calendar") renderCalendar();
   // słówko: po zalogowaniu (albo zmianie dnia) przerysuj raz, żeby pobrać słówko z konta / od AI
   if (view === "words") { const k = (store.uid || "local") + "|" + iso(new Date()); if (k !== wordsShownFor) { wordsShownFor = k; renderWords(); } }
