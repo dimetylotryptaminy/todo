@@ -105,10 +105,10 @@ async function dailyWord(req, env) {
   const clean = (a) => (Array.isArray(a) ? a : []).map((x) => String(x).slice(0, 60)).slice(-400);
   const avoidEs = clean(body.avoid && body.avoid.es), avoidEn = clean(body.avoid && body.avoid.en);
   const prompt =
-`Przygotuj „słówko na dziś” dla Polaka, przedsiębiorcy (spółki giełdowe, inwestycje), który część roku mieszka w Sotogrande w Hiszpanii.
-1) Jedno hiszpańskie słowo lub krótkie wyrażenie (poziom B1–B2), przydatne na co dzień w Hiszpanii albo w biznesie. Rzeczowniki podaj z rodzajnikiem (el/la).
-2) Jedno angielskie słowo, phrasal verb lub idiom (poziom B2–C1), przydatne w biznesie lub na co dzień.
-Do każdego: znaczenie po polsku (krótko), jedno naturalne zdanie przykładowe w tym języku i jego tłumaczenie na polski.
+`Przygotuj „słówko na dziś” dla Polaka, który część roku mieszka w Hiszpanii (Sotogrande).
+1) Jedno hiszpańskie słowo lub krótkie wyrażenie przydatne w codziennym życiu w Hiszpanii (zakupy, restauracja, dom, sąsiedzi, pogoda, transport, urzędy, rozmowy ze znajomymi). Bez słownictwa biznesowego. Rzeczowniki podaj z rodzajnikiem (el/la).
+2) Jedno angielskie słowo, phrasal verb lub idiom na poziomie C1, używane na co dzień (rozmowy, emocje, sytuacje życiowe), nie typowo biznesowe.
+Do każdego: znaczenie po polsku (krótko) i jedno KRÓTKIE, naturalne zdanie przykładowe (najwyżej 8 słów) oraz jego tłumaczenie na polski.
 Nie używaj żadnego z tych słów hiszpańskich: ${avoidEs.join(", ") || "(brak)"}.
 Nie używaj żadnego z tych słów angielskich: ${avoidEn.join(", ") || "(brak)"}.
 Zwróć wyłącznie JSON: {"es":{"word":"","meaning":"","example":"","example_pl":""},"en":{"word":"","meaning":"","example":"","example_pl":""}}`;
