@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v74";
+const APP_VERSION = "v75";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -529,6 +529,7 @@ function buildSheet() {
   const m = document.createElement("div"); m.className = "motto"; m.id = "motto";
   m.contentEditable = "true"; m.spellcheck = false; m.setAttribute("role", "textbox"); m.setAttribute("aria-label", "Motto");
   m.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); m.blur(); } });
+  m.addEventListener("focus", () => m.classList.remove("hand"));
   m.addEventListener("blur", () => {
     const v = m.textContent.trim() || DEFAULT_MOTTO;
     if (v !== store.motto) store.setMotto(v); else m.textContent = v;
@@ -813,6 +814,8 @@ function renderInner() {
   wk.textContent = dateLine.charAt(0).toUpperCase() + dateLine.slice(1);
   const s = document.createElement("small"); s.textContent = APP_VERSION + (store.meta.local ? " · lokalnie" : store.email ? " · " + store.email : ""); wk.append(s);
   $("motto").textContent = store.motto;
+  // w stopce to samo odręczne motto co na górze (kliknięcie pozwala je edytować jako tekst)
+  if (document.activeElement !== $("motto")) $("motto").classList.toggle("hand", store.motto.trim() === DEFAULT_MOTTO);
   // pasek u góry (komputer): motto, dzisiejsza data i numer tygodnia
   const now = new Date();
   $("tiMotto").textContent = store.motto;

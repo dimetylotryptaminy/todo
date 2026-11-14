@@ -767,3 +767,10 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none 
 @media (max-width: 760px) { .ti-motto.hand { width: min(260px, 72vw); } }
 @media (min-width: 761px) { .topline { column-gap: 0; } }
 @media (min-width: 761px) { .ti-motto.hand { position: relative; top: 3px; } }
+
+/* odręczne motto także w stopce tablicy */
+.motto.hand {
+  display: inline-block; width: 280px; max-width: 70vw; aspect-ratio: 8 / 1; color: transparent; overflow: hidden; white-space: nowrap;
+  background: var(--ink); -webkit-mask: url("motto.png") right center / contain no-repeat; mask: url("motto.png") right center / contain no-repeat;
+}
+.motto.hand:focus { outline-offset: 4px; }
