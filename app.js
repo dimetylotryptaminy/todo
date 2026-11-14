@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v52";
+const APP_VERSION = "v53";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -116,6 +116,13 @@ async function firebaseStore(config) {
       s.hidden = h; lsSet(key("hidden"), h); s.onChange();
       F.setDoc(F.doc(db, "users", s.uid), { hidden: h }, { merge: true }).catch(writeErr);
     },
+    // słówka dnia: users/{uid}/daily/{RRRR-MM-DD} = {es: [...], en: [...]}; historia słów w users/{uid}.wordHistory
+    wordHistory: { es: [], en: [] },
+    async getDaily(date) { const d = await F.getDoc(F.doc(db, "users", s.uid, "daily", date)); return d.exists() ? d.data() : null; },
+    async setDaily(date, data) {
+      await F.setDoc(F.doc(db, "users", s.uid, "daily", date), data);
+      await F.setDoc(F.doc(db, "users", s.uid), { wordHistory: { es: F.arrayUnion(data.es[0]), en: F.arrayUnion(data.en[0]) } }, { merge: true });
+    },
     fields: null,
     // lista pól (nazwy, kolejność, szerokości) — zapisywana na koncie, wspólna dla wszystkich urządzeń
     setFields(f) {
@@ -151,6 +158,8 @@ async function firebaseStore(config) {
       if (m !== s.motto) { s.motto = m; lsSet(key("motto"), m); s.onChange(); }
       const h = d.exists() && Array.isArray(d.data().hidden) ? d.data().hidden : null;
       if (h && JSON.stringify(h) !== JSON.stringify(s.hidden)) { s.hidden = h; lsSet(key("hidden"), h); s.onChange(); }
+      const wh = d.exists() && d.data().wordHistory;
+      if (wh) s.wordHistory = { es: Array.isArray(wh.es) ? wh.es : [], en: Array.isArray(wh.en) ? wh.en : [] };
       const fl = d.exists() && Array.isArray(d.data().fields) && d.data().fields.length ? d.data().fields : null;
       if (fl && JSON.stringify(fl) !== JSON.stringify(s.fields)) { s.fields = fl; lsSet(key("fields"), fl); s.onChange(); }
     }, () => {}));
@@ -625,6 +634,8 @@ function renderInner() {
   const s = document.createElement("small"); s.textContent = w.range + " · " + APP_VERSION + (store.meta.local ? " · lokalnie" : store.email ? " · " + store.email : ""); wk.append(s);
   $("motto").textContent = store.motto;
   if (view === "calendar") renderCalendar();
+  // słówko: po zalogowaniu (albo zmianie dnia) przerysuj raz, żeby pobrać słówko z konta / od AI
+  if (view === "words") { const k = (store.uid || "local") + "|" + iso(new Date()); if (k !== wordsShownFor) { wordsShownFor = k; renderWords(); } }
   renderStatus();
 }
 document.addEventListener("focusout", () => setTimeout(render, 0));
@@ -1488,12 +1499,56 @@ function wordCard(code, langName, ttsLang, entry) {
   return card;
 }
 
-function renderWords() {
+// Słówko dla danego dnia: najpierw kopia w urządzeniu, potem konto (Firebase), a dla dzisiejszego dnia —
+// jeśli jeszcze go nie ma — nowe słówko od AI (przez serwer w Cloudflare). Bez internetu lub przy błędzie: lista wbudowana.
+const wordsCacheKey = () => "words." + ((store && store.uid) || "local");
+const staticWords = (n) => ({
+  es: ES_WORDS[((n % ES_WORDS.length) + ES_WORDS.length) % ES_WORDS.length],
+  en: EN_WORDS[(((n * 37 + 11) % EN_WORDS.length) + EN_WORDS.length) % EN_WORDS.length],
+  source: "offline",
+});
+const wordsInflight = {};
+async function wordsFor(d, isToday) {
+  const key = iso(d);
+  const cache = lsGet(wordsCacheKey(), {});
+  if (cache[key]) return { ...cache[key], source: "ai" };
+  const save = (w) => { const c = lsGet(wordsCacheKey(), {}); c[key] = { es: w.es, en: w.en }; const ks = Object.keys(c).sort(); while (ks.length > 120) delete c[ks.shift()]; lsSet(wordsCacheKey(), c); };
+  const cloud = store && store.getDaily && store.uid;
+  if (cloud && navigator.onLine) {
+    try { const got = await store.getDaily(key); if (got && got.es && got.en) { save(got); return { ...got, source: "ai" }; } } catch (e) { dbg("słówko getDaily: " + (e && (e.code || e.message))); }
+    if (isToday && STT_URL) {
+      if (!wordsInflight[key]) wordsInflight[key] = (async () => {
+        const token = await store.auth.currentUser.getIdToken();
+        const local = Object.values(lsGet(wordsCacheKey(), {}));
+        const hist = store.wordHistory || { es: [], en: [] };
+        const avoid = {
+          es: [...new Set([...hist.es, ...local.map((w) => w.es[0]), ...ES_WORDS.map((w) => w[0])])].slice(-400),
+          en: [...new Set([...hist.en, ...local.map((w) => w.en[0]), ...EN_WORDS.map((w) => w[0])])].slice(-400),
+        };
+        const res = await fetch(STT_URL.replace(/\/+$/, "") + "/word", {
+          method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify({ avoid }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.es || !data.en) throw new Error(data.error ? data.error + (data.status ? " " + data.status : "") : "HTTP " + res.status);
+        // drugie urządzenie mogło w międzyczasie zapisać słówko — wtedy bierzemy tamto, żeby wszędzie było to samo
+        const again = await store.getDaily(key).catch(() => null);
+        if (again && again.es && again.en) return again;
+        const w = { es: data.es, en: data.en, created: Date.now() };
+        await store.setDaily(key, w);
+        return w;
+      })().finally(() => { setTimeout(() => delete wordsInflight[key], 0); });
+      try { const w = await wordsInflight[key]; save(w); return { ...w, source: "ai" }; }
+      catch (e) { dbg("słówko AI: " + (e && e.message)); return { ...staticWords(dayNo(d)), source: "offline", error: e && e.message }; }
+    }
+  }
+  return staticWords(dayNo(d));
+}
+
+let wordsRenderSeq = 0;
+async function renderWords() {
   const root = $("words");
+  const seq = ++wordsRenderSeq;
   const d = new Date(); d.setDate(d.getDate() + wordsOffset);
-  const n = dayNo(d);
-  const es = ES_WORDS[((n % ES_WORDS.length) + ES_WORDS.length) % ES_WORDS.length];
-  const en = EN_WORDS[(((n * 37 + 11) % EN_WORDS.length) + EN_WORDS.length) % EN_WORDS.length];
 
   const head = document.createElement("div"); head.className = "words-head";
   const prev = document.createElement("button"); prev.type = "button"; prev.className = "yearbtn"; prev.textContent = "‹"; prev.setAttribute("aria-label", "Poprzedni dzień");
@@ -1506,9 +1561,21 @@ function renderWords() {
   const t2 = document.createElement("p"); t2.textContent = WEEKDAYS_FULL[d.getDay()] + ", " + d.getDate() + " " + MONTHS_GEN[d.getMonth()] + " " + d.getFullYear();
   title.append(t1, t2);
   head.append(prev, title, next);
+
+  const loading = document.createElement("p"); loading.className = "muted words-loading"; loading.textContent = "Przygotowuję słówko na dziś…";
+  root.replaceChildren(head, loading);
+
+  const w = await wordsFor(d, wordsOffset === 0);
+  if (seq !== wordsRenderSeq) return;            // w międzyczasie przełączono dzień
   const cards = document.createElement("div"); cards.className = "wcards";
-  cards.append(wordCard("es", "hiszpański", "es-ES", es), wordCard("en", "angielski", "en-GB", en));
+  cards.append(wordCard("es", "hiszpański", "es-ES", w.es), wordCard("en", "angielski", "en-GB", w.en));
   const nodes = [head, cards];
+  if (w.source === "offline") {
+    const info = document.createElement("p"); info.className = "muted words-src";
+    info.textContent = w.error ? "Nie udało się pobrać nowego słówka (" + w.error + ") — pokazuję słówko z wbudowanej listy."
+      : (!navigator.onLine ? "Bez internetu — pokazuję słówko z wbudowanej listy." : "Słówko z wbudowanej listy.");
+    nodes.push(info);
+  }
   if (wordsOffset !== 0) {
     const back = document.createElement("button"); back.type = "button"; back.className = "ghost words-today"; back.textContent = "Wróć do dzisiejszego słówka";
     back.addEventListener("click", () => { wordsOffset = 0; renderWords(); });
@@ -1538,6 +1605,7 @@ function applyView() {
   if (view === "calendar" && store) renderCalendar();
   if (view === "words") renderWords();
 }
+let wordsShownFor = "";
 $("tabTasks").addEventListener("click", () => setView("tasks"));
 $("tabCal").addEventListener("click", () => setView("calendar"));
 $("tabWords").addEventListener("click", () => setView("words"));

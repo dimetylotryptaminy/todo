@@ -1,4 +1,8 @@
-// Tablica spółek — serwer rozpoznawania mowy (Cloudflare Worker).
+// Tablica spółek — serwer rozpoznawania mowy i „słówka na dziś” (Cloudflare Worker).
+//
+// POST /word  (JSON {avoid: {es: [...], en: [...]}}) → nowe słówko dnia wymyślone przez AI:
+//   {"es": [słowo, znaczenie po polsku, zdanie, tłumaczenie], "en": [...]}
+// POST /      (treść = nagranie audio) → rozpoznany tekst {"text": "..."}
 //
 // Aplikacja wysyła tu nagranie (POST, treść = plik audio) z tokenem logowania Firebase w nagłówku
 // Authorization. Worker sprawdza token (podpis Google, projekt, ważność, dozwolony e-mail),
@@ -10,6 +14,7 @@
 //   ALLOWED_EMAILS       (Text)    e-maile, które mogą korzystać (po przecinku)
 //   ALLOWED_ORIGIN       (Text)    adres aplikacji, np. https://dimetylotryptaminy.github.io
 //   MODEL                (Text, opcjonalnie) domyślnie gpt-4o-mini-transcribe
+//   WORD_MODEL           (Text, opcjonalnie) model do słówek, domyślnie gpt-4o-mini
 
 const JWKS_URL = "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com";
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -39,6 +44,8 @@ export default {
     const allowed = (env.ALLOWED_EMAILS || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
     if (!allowed.length || !allowed.includes(String(claims.email || "").toLowerCase())) return json({ error: "forbidden" }, 403);
 
+    if (new URL(req.url).pathname.replace(/\/+$/, "") === "/word") return json(await dailyWord(req, env), 200);
+
     // 2) nagranie
     const type = (req.headers.get("content-type") || "audio/webm").split(";")[0].trim();
     const audio = await req.arrayBuffer();
@@ -62,6 +69,41 @@ export default {
     return json({ text: String(data.text || "").trim() });
   },
 };
+
+// Słówko na dziś: jedno hiszpańskie i jedno angielskie, z przykładem i tłumaczeniem, bez powtórek z listy „avoid”.
+async function dailyWord(req, env) {
+  let body = {};
+  try { body = await req.json(); } catch {}
+  const clean = (a) => (Array.isArray(a) ? a : []).map((x) => String(x).slice(0, 60)).slice(-400);
+  const avoidEs = clean(body.avoid && body.avoid.es), avoidEn = clean(body.avoid && body.avoid.en);
+  const prompt =
+`Przygotuj „słówko na dziś” dla Polaka, przedsiębiorcy (spółki giełdowe, inwestycje), który część roku mieszka w Sotogrande w Hiszpanii.
+1) Jedno hiszpańskie słowo lub krótkie wyrażenie (poziom B1–B2), przydatne na co dzień w Hiszpanii albo w biznesie. Rzeczowniki podaj z rodzajnikiem (el/la).
+2) Jedno angielskie słowo, phrasal verb lub idiom (poziom B2–C1), przydatne w biznesie lub na co dzień.
+Do każdego: znaczenie po polsku (krótko), jedno naturalne zdanie przykładowe w tym języku i jego tłumaczenie na polski.
+Nie używaj żadnego z tych słów hiszpańskich: ${avoidEs.join(", ") || "(brak)"}.
+Nie używaj żadnego z tych słów angielskich: ${avoidEn.join(", ") || "(brak)"}.
+Zwróć wyłącznie JSON: {"es":{"word":"","meaning":"","example":"","example_pl":""},"en":{"word":"","meaning":"","example":"","example_pl":""}}`;
+  const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: "Bearer " + env.OPENAI_API_KEY, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: env.WORD_MODEL || "gpt-4o-mini",
+      response_format: { type: "json_object" },
+      temperature: 0.9,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!r.ok) return { error: "word_failed", status: r.status, detail: (await r.text()).slice(0, 300) };
+  const data = await r.json();
+  let out;
+  try { out = JSON.parse(data.choices[0].message.content); } catch { return { error: "bad_json" }; }
+  const pick = (o) => o && ["word", "meaning", "example", "example_pl"].every((k) => typeof o[k] === "string" && o[k].trim())
+    ? [o.word.trim(), o.meaning.trim(), o.example.trim(), o.example_pl.trim()] : null;
+  const es = pick(out.es), en = pick(out.en);
+  if (!es || !en) return { error: "bad_word" };
+  return { es, en };
+}
 
 // Weryfikacja tokenu logowania Firebase (JWT RS256 podpisany przez Google).
 async function verifyFirebaseToken(token, projectId, now = Math.floor(Date.now() / 1000)) {
