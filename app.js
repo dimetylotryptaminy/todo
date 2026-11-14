@@ -1,7 +1,7 @@
 import { CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v31";
+const APP_VERSION = "v32";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -47,6 +47,8 @@ function localStore() {
     put(id, data) { s.items[id] = data; lsSet("items", s.items); s.onChange(); },
     del(id) { delete s.items[id]; lsSet("items", s.items); s.onChange(); },
     setMotto(m) { s.motto = m; lsSet("motto", m); s.onChange(); },
+    hidden: lsGet("hidden", []),
+    setHidden(h) { s.hidden = h; lsSet("hidden", h); s.onChange(); },
   };
   return s;
 }
@@ -83,6 +85,7 @@ async function firebaseStore(config) {
         server = user ? lsGet(key("srv"), {}) : {};
         pending = user ? lsGet(key("pend"), {}) : {};
         s.motto = (user && lsGet(key("motto"), null)) || DEFAULT_MOTTO;
+        s.hidden = (user && lsGet(key("hidden"), null)) || [];
         showLogin(!user);
         refreshMeta(); cb();
         if (!user) return;
@@ -101,6 +104,12 @@ async function firebaseStore(config) {
     setMotto(m) {
       s.motto = m; lsSet(key("motto"), m); s.onChange();
       F.setDoc(F.doc(db, "users", s.uid), { motto: m }, { merge: true }).catch(writeErr);
+    },
+    hidden: [],
+    // schowane pola — zapisywane na koncie, więc widok jest taki sam na komputerze i telefonie
+    setHidden(h) {
+      s.hidden = h; lsSet(key("hidden"), h); s.onChange();
+      F.setDoc(F.doc(db, "users", s.uid), { hidden: h }, { merge: true }).catch(writeErr);
     },
   };
 
@@ -129,6 +138,8 @@ async function firebaseStore(config) {
       if (d.metadata.fromCache) return;
       const m = (d.exists() && d.data().motto) || DEFAULT_MOTTO;
       if (m !== s.motto) { s.motto = m; lsSet(key("motto"), m); s.onChange(); }
+      const h = d.exists() && Array.isArray(d.data().hidden) ? d.data().hidden : null;
+      if (h && JSON.stringify(h) !== JSON.stringify(s.hidden)) { s.hidden = h; lsSet(key("hidden"), h); s.onChange(); }
     }, () => {}));
   }
 
@@ -288,7 +299,10 @@ const todos = () => Object.entries(store.items).filter(([, d]) => d && d.type ==
 const strip = ({ id, ...rest }) => rest;
 let flashId = null, lastUndo = null;
 
-function write(id, data) { if (data === null) store.del(id); else store.put(id, data); }
+function write(id, data) {
+  if (data === null) store.del(id); else store.put(id, data);
+  if (data && data.cat && (store.hidden || []).includes(data.cat)) setTimeout(() => note(`Zapisano w schowanym polu ${data.cat} — stuknij je na górze tablicy, żeby zobaczyć.`), 50);
+}
 
 function isoWeek(d) {
   const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -311,7 +325,17 @@ const sheet = $("sheet");
 const checkSvg = '<svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2 6.5l2.6 2.5L10 3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const boxes = {};
 
+const hideSvg = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+function setBoxHidden(cat, hide) {
+  const cur = (store && store.hidden) || [];
+  const next = hide ? [...new Set([...cur, cat])] : cur.filter((c) => c !== cat);
+  store.setHidden(CATS.filter((c) => next.includes(c)));
+}
+
 function buildSheet() {
+  const strip = document.createElement("div");
+  strip.className = "hidden-strip"; strip.id = "hiddenStrip"; strip.hidden = true;
+  sheet.append(strip);
   for (const cat of CATS) {
     const box = document.createElement("section");
     box.className = "box" + (cat === "INNE" ? " inne" : "");
@@ -320,7 +344,11 @@ function buildSheet() {
     const name = document.createElement("span"); name.textContent = cat;
     const n = document.createElement("span"); n.className = "n";
     const right = document.createElement("span"); right.className = "hright";
-    right.append(n, boxMic(cat));
+    const hide = document.createElement("button");
+    hide.type = "button"; hide.className = "boxhide"; hide.innerHTML = hideSvg;
+    hide.setAttribute("aria-label", "Schowaj pole " + cat); hide.title = "Schowaj pole";
+    hide.addEventListener("click", () => setBoxHidden(cat, true));
+    right.append(n, hide, boxMic(cat));
     h.append(name, right);
     const ul = document.createElement("ul");
     const add = document.createElement("input");
@@ -391,6 +419,42 @@ function itemEl(t) {
   return li;
 }
 
+// Schowane pola: znikają z siatki, a na górze tablicy zostaje etykieta (nazwa + liczba otwartych), która je odkrywa.
+function renderHidden() {
+  const hidden = store.hidden || [];
+  let col = 0;
+  for (const cat of CATS) {
+    const box = $("box-" + cat.toLowerCase());
+    const isHidden = hidden.includes(cat);
+    box.hidden = isHidden;
+    box.classList.remove("col2", "wide");
+    if (isHidden || cat === "INNE") continue;
+    if (col === 1) box.classList.add("col2");
+    col = 1 - col;
+  }
+  // nieparzysta liczba widocznych pól spółek: ostatnie zajmuje całą szerokość
+  const visible = CATS.filter((c) => c !== "INNE" && !hidden.includes(c));
+  if (visible.length % 2 === 1) $("box-" + visible[visible.length - 1].toLowerCase()).classList.add("wide");
+  // INNE schowane: dolna linia ostatniego widocznego pola zamyka siatkę nad stopką
+  $("sheet").classList.toggle("inne-hidden", hidden.includes("INNE"));
+
+  const strip = $("hiddenStrip");
+  strip.hidden = !hidden.length;
+  const label = document.createElement("span"); label.className = "hs-label"; label.textContent = "Schowane:";
+  const chips = hidden.map((cat) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "chip";
+    b.setAttribute("aria-label", "Pokaż pole " + cat);
+    const nm = document.createElement("span"); nm.textContent = cat;
+    b.append(nm);
+    const open = boxes[cat] ? boxes[cat].open : 0;
+    if (open) { const c = document.createElement("span"); c.className = "chip-n"; c.textContent = open; b.append(c); }
+    b.addEventListener("click", () => setBoxHidden(cat, false));
+    return b;
+  });
+  strip.replaceChildren(label, ...chips);
+}
+
 function render() {
   if (!store) return;
   const a = document.activeElement;
@@ -402,7 +466,9 @@ function render() {
     boxes[cat].ul.replaceChildren(...list.map(itemEl));
     const open = list.filter((t) => !t.done).length;
     boxes[cat].n.textContent = list.length ? open + " otwarte" : "";
+    boxes[cat].open = open;
   }
+  renderHidden();
   const w = weekInfo();
   const wk = $("week");
   wk.textContent = w.week + "/" + w.total;
