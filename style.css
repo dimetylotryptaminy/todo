@@ -741,3 +741,9 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none 
   .ti-date { padding-right: 0; }
   .ti-motto.hand { width: min(360px, 90vw); margin-bottom: 0; }
 }
+/* motto nieco mniejsze; zakładki wyrównane do wysokości motta (dolne krawędzie w jednej linii) */
+.topline .tabs { margin-bottom: 0; }
+.topinfo { flex-basis: 390px; }
+.ti-motto.hand { max-width: 390px; margin-bottom: 0; }
+@media (max-width: 760px) { .ti-motto.hand { width: min(300px, 80vw); } }
+.topline .tabs { align-self: flex-end; }
