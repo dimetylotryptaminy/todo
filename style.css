@@ -12,6 +12,14 @@
   --navy: #10246b;
   --navy-hi: #2c4596;
   --navy-ink: #ffffff;
+  --bg-sand: #f5eedf;
+  --bg-peach: #fbe6d6;
+  --bg-rose: #f8e3e6;
+  --bg-lemon: #f7f1cf;
+  --bg-mint: #e1f0e8;
+  --bg-sky: #e0ecf7;
+  --bg-lavender: #ebe5f6;
+  --bg-gray: #efefec;
   --font: "DM Sans", "Helvetica Neue", Arial, system-ui, sans-serif;
   color-scheme: light;
 }
@@ -20,6 +28,7 @@
     --paper: #1b1d1b; --desk: #121312; --ink: #e9ebe6; --ink-soft: #a3a99f;
     --line: #8b9187; --hair: #353934; --accent: #8cc2b1; --done: #6b7168; --warn: #e0a85c;
     --navy: #1a3285; --navy-hi: #3b57b3; --navy-ink: #ffffff;
+    --bg-sand: #2b271f; --bg-peach: #30241b; --bg-rose: #2f2024; --bg-lemon: #2b2a1a; --bg-mint: #1b2a23; --bg-sky: #1b2531; --bg-lavender: #252136; --bg-gray: #262826;
     color-scheme: dark;
   }
 }
@@ -269,3 +278,28 @@ body.has-taskbar { padding-bottom: calc(130px + env(safe-area-inset-bottom, 0px)
 .danger { color: var(--warn); align-self: flex-start; margin-top: 4px; }
 .danger.armed { color: var(--paper); background: var(--warn); text-decoration: none; border-radius: 8px; padding: 8px 12px; }
 #fieldDlg { background: rgba(0,0,0,.35); }
+
+/* tła pól (wybierane w oknie edycji pola) */
+.box.bg-sand { background: var(--bg-sand); }
+.box.bg-peach { background: var(--bg-peach); }
+.box.bg-rose { background: var(--bg-rose); }
+.box.bg-lemon { background: var(--bg-lemon); }
+.box.bg-mint { background: var(--bg-mint); }
+.box.bg-sky { background: var(--bg-sky); }
+.box.bg-lavender { background: var(--bg-lavender); }
+.box.bg-gray { background: var(--bg-gray); }
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.sw { position: relative; width: 36px; height: 36px; cursor: pointer; }
+.sw input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.sw span { display: block; width: 100%; height: 100%; border-radius: 50%; border: 1px solid var(--hair); }
+.sw-sand span { background: var(--bg-sand); }
+.sw-peach span { background: var(--bg-peach); }
+.sw-rose span { background: var(--bg-rose); }
+.sw-lemon span { background: var(--bg-lemon); }
+.sw-mint span { background: var(--bg-mint); }
+.sw-sky span { background: var(--bg-sky); }
+.sw-lavender span { background: var(--bg-lavender); }
+.sw-gray span { background: var(--bg-gray); }
+.sw-none span { background: var(--paper); background-image: linear-gradient(135deg, transparent 46%, var(--warn) 47%, var(--warn) 53%, transparent 54%); }
+.sw input:checked + span { box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px var(--accent); }
+.sw input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 3px; }

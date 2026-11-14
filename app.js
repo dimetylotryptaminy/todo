@@ -1,7 +1,7 @@
 import { parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v37";
+const APP_VERSION = "v38";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -379,7 +379,9 @@ let builtKey = "", foot = null;
 function makeBox(f) {
   const cat = f.id;
   const box = document.createElement("section");
-  box.className = "box" + (f.size === "third" ? " statusbox" : "");
+  // tło: wybrane w oknie edycji; pola bez wyboru zachowują dawny wygląd (pola 1/3 lekko szare)
+  const bg = f.bg || (f.size === "third" ? "gray" : "none");
+  box.className = "box" + (bg !== "none" ? " bg-" + bg : "");
   box.id = "box-" + slug(cat);
   const h = document.createElement("h2");
   const name = document.createElement("button");
@@ -532,6 +534,8 @@ function openFieldDialog(id) {
   $("fieldTitle").textContent = id ? "Edytuj pole" : "Nowe pole";
   $("fieldName").value = f.name;
   document.querySelectorAll('input[name="fsize"]').forEach((r) => { r.checked = r.value === f.size; });
+  const bg = f.bg || (id && f.size === "third" ? "gray" : "none");
+  document.querySelectorAll('input[name="fbg"]').forEach((r) => { r.checked = r.value === bg; });
   $("fieldMove").hidden = !id;
   $("fieldDelete").hidden = !id;
   resetDelete();
@@ -550,13 +554,14 @@ $("fieldForm").addEventListener("submit", (e) => {
   const name = $("fieldName").value.trim().replace(/\s+/g, " ");
   if (!name) { $("fieldErr").textContent = "Wpisz nazwę pola."; return; }
   const size = (document.querySelector('input[name="fsize"]:checked') || {}).value || "half";
+  const bg = (document.querySelector('input[name="fbg"]:checked') || {}).value || "none";
   const list = fieldList().map((f) => ({ ...f }));
   if (editing) {
-    const f = list.find((x) => x.id === editing); if (f) { f.name = name; f.size = size; }
+    const f = list.find((x) => x.id === editing); if (f) { f.name = name; f.size = size; f.bg = bg; }
     store.setFields(list);
     note(`Zapisano pole ${name}.`);
   } else {
-    list.push({ id: "f" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name, size });
+    list.push({ id: "f" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name, size, bg });
     store.setFields(list);
     note(`Dodano pole ${name} — jest na końcu tablicy.`);
     setTimeout(() => { const last = sheet.querySelectorAll(".box"); const b = last[last.length - 1]; if (b) b.scrollIntoView({ behavior: "smooth", block: "center" }); }, 60);
