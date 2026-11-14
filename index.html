@@ -57,8 +57,12 @@
   </header>
 
   <nav class="tabs" role="tablist" aria-label="Widok">
-    <button class="tab" id="tabTasks" role="tab" type="button" aria-controls="sheet">ZADANIA</button>
-    <button class="tab" id="tabCal" role="tab" type="button" aria-controls="calendar">KALENDARZ</button>
+    <button class="tab" id="tabTasks" role="tab" type="button" aria-controls="sheet">
+      <span class="lbl"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6l2 2 3-3M4 13l2 2 3-3M12 7h8M12 14h8M12 20h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Zadania</span>
+    </button>
+    <button class="tab" id="tabCal" role="tab" type="button" aria-controls="calendar">
+      <span class="lbl"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 10h17M8 3v4M16 3v4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Kalendarz</span>
+    </button>
   </nav>
   <main class="sheet" id="sheet"></main>
   <section class="cal" id="calendar" hidden aria-label="Kalendarz roczny"></section>
