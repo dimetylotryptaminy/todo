@@ -22,9 +22,9 @@
   --bg-gray: #efefec;
   --card: #e4d8bd; --label: #fbf8ef; --label-edge: #b9ab88;
   --ev-trip: #cfe2f6; --ev-trip-s: #2f6db5;
-  --ev-guest: #d3eedd; --ev-guest-s: #2e8a57;
+  --ev-holiday: #d3eedd; --ev-holiday-s: #2e8a57;
   --ev-work: #ddd7f3; --ev-work-s: #5b49b0;
-  --ev-holiday: #fde1c1; --ev-holiday-s: #c4650f;
+  --ev-guest: #fde1c1; --ev-guest-s: #c4650f;
   --ev-other: #f6d6dc; --ev-other-s: #b8455c;
   --font: "DM Sans", "Helvetica Neue", Arial, system-ui, sans-serif;
   color-scheme: light;
@@ -35,8 +35,8 @@
     --line: #8b9187; --hair: #353934; --accent: #8cc2b1; --done: #6b7168; --warn: #e0a85c;
     --navy: #1a3285; --navy-hi: #3b57b3; --navy-ink: #ffffff;
     --card: #3a3427; --label: #24221d; --label-edge: #5f5640;
-    --ev-trip: #203752; --ev-trip-s: #7fb2ec; --ev-guest: #1f3b2c; --ev-guest-s: #6fcf98; --ev-work: #2e2a4d; --ev-work-s: #a597ee;
-    --ev-holiday: #46311a; --ev-holiday-s: #f0a457; --ev-other: #44252d; --ev-other-s: #ee8ea2;
+    --ev-trip: #203752; --ev-trip-s: #7fb2ec; --ev-holiday: #1f3b2c; --ev-holiday-s: #6fcf98; --ev-work: #2e2a4d; --ev-work-s: #a597ee;
+    --ev-guest: #46311a; --ev-guest-s: #f0a457; --ev-other: #44252d; --ev-other-s: #ee8ea2;
     --bg-sand: #2b271f; --bg-peach: #30241b; --bg-rose: #2f2024; --bg-lemon: #2b2a1a; --bg-mint: #1b2a23; --bg-sky: #1b2531; --bg-lavender: #252136; --bg-gray: #262826;
     color-scheme: dark;
   }
