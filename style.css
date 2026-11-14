@@ -659,3 +659,26 @@ li.done .chk { background: var(--accent); border-color: var(--accent); }
 .share-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .share-members { margin: 0; padding-left: 18px; font-size: 14px; display: grid; gap: 4px; }
 @media (max-width: 640px) { .cal-btns { flex: 1; } .cal-btns > * { flex: 1; } }
+
+/* przeciąganie zadań */
+.box li { grid-template-columns: 16px 26px 1fr 30px; }
+.grip { display: grid; place-items: center; height: 24px; margin-top: 1px; color: var(--done); cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; opacity: .55; }
+.grip svg { width: 10px; height: 16px; }
+.box li:hover .grip { opacity: 1; }
+@media (hover: none) { .grip { opacity: .8; } }
+.drag-ghost { position: fixed; z-index: 50; margin: 0; list-style: none; pointer-events: none; display: grid; grid-template-columns: 16px 26px 1fr 30px; gap: 4px; align-items: start;
+  padding: 6px 10px; background: var(--paper); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.25); transform: rotate(-1deg); }
+.drag-ph { list-style: none; border: 2px dashed color-mix(in srgb, var(--accent) 50%, var(--hair)); border-radius: 10px; background: color-mix(in srgb, var(--accent) 6%, transparent); }
+body.dragging, body.dragging * { cursor: grabbing !important; user-select: none !important; -webkit-user-select: none !important; }
+
+/* archiwum */
+#archDlg { background: rgba(0,0,0,.35); }
+.arch-card { width: min(640px, 100%); max-height: min(80vh, 760px); overflow: auto; }
+.arch-q { font: inherit; font-size: 16px; padding: 10px 12px; border: 1px solid var(--hair); border-radius: 10px; background: var(--paper); color: var(--ink); }
+.arch-list { display: flex; flex-direction: column; gap: 2px; }
+.arch-day { margin: 12px 0 4px; font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); }
+.arch-row { display: grid; grid-template-columns: auto 1fr auto auto; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px dashed var(--hair); }
+.arch-tag { font: 700 10px/1 var(--font); letter-spacing: .06em; color: #fff; background: var(--hd); padding: 4px 7px; border-radius: 6px; white-space: nowrap; }
+.arch-text { min-width: 0; overflow-wrap: anywhere; font-size: 14.5px; color: var(--ink-soft); }
+.arch-row .ghost { font-size: 13px; padding: 4px; }
+.arch-row .x { opacity: 1; }

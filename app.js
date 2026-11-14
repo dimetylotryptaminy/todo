@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v59";
+const APP_VERSION = "v60";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -388,7 +388,10 @@ $("forgot").addEventListener("click", async () => {
 });
 
 // ---------------- rendering ----------------
-const todos = () => Object.entries(store.items).filter(([, d]) => d && d.type === "todo").map(([id, d]) => ({ id, ...d }));
+const todos = () => Object.entries(store.items).filter(([, d]) => d && d.type === "todo" && !d.archived).map(([id, d]) => ({ id, ...d }));
+const archivedTodos = () => Object.entries(store.items).filter(([, d]) => d && d.type === "todo" && d.archived).map(([id, d]) => ({ id, ...d }));
+// kolejność w polu: ręcznie ustawiona (przeciąganie) albo kolejność dodania
+const ord = (t) => (typeof t.order === "number" ? t.order : t.created || 0);
 const strip = ({ id, ...rest }) => rest;
 let flashId = null, lastUndo = null;
 
@@ -546,14 +549,20 @@ function boxMic(cat) {
   return el;
 }
 
+const gripSvg = '<svg viewBox="0 0 12 20" aria-hidden="true"><g fill="currentColor"><circle cx="3" cy="4" r="1.6"/><circle cx="9" cy="4" r="1.6"/><circle cx="3" cy="10" r="1.6"/><circle cx="9" cy="10" r="1.6"/><circle cx="3" cy="16" r="1.6"/><circle cx="9" cy="16" r="1.6"/></g></svg>';
 function itemEl(t) {
   const li = document.createElement("li");
+  li.dataset.id = t.id;
   if (t.done) li.classList.add("done");
+  const grip = document.createElement("span"); grip.className = "grip"; grip.innerHTML = gripSvg;
+  grip.title = "Przeciągnij, żeby zmienić kolejność albo przenieść do innego pola";
+  grip.setAttribute("aria-hidden", "true");
+  grip.addEventListener("pointerdown", (e) => startDrag(e, t, li));
   if (t.id === flashId) { li.classList.add("flash"); flashId = null; }
   const chk = document.createElement("button");
   chk.className = "chk"; chk.type = "button"; chk.innerHTML = checkSvg;
   chk.setAttribute("aria-label", t.done ? "Oznacz jako niezrobione" : "Oznacz jako zrobione");
-  chk.addEventListener("click", () => write(t.id, strip({ ...t, done: !t.done, updated: Date.now() })));
+  chk.addEventListener("click", () => write(t.id, strip({ ...t, done: !t.done, doneAt: !t.done ? Date.now() : null, updated: Date.now() })));
   const txt = document.createElement("span");
   txt.className = "txt"; txt.textContent = t.text; txt.contentEditable = "true"; txt.spellcheck = false;
   txt.setAttribute("role", "textbox"); txt.setAttribute("aria-label", "Treść zadania");
@@ -569,9 +578,82 @@ function itemEl(t) {
   const x = document.createElement("button");
   x.className = "x"; x.type = "button"; x.textContent = "×"; x.setAttribute("aria-label", "Usuń zadanie");
   x.addEventListener("click", () => { lastUndo = [[t.id, strip(t)]]; write(t.id, null); note("Usunięto „" + t.text + "”.", false, true); });
-  li.append(chk, txt, x);
+  li.append(grip, chk, txt, x);
   return li;
 }
+
+// ---------- przeciąganie zadań (myszką i palcem) ----------
+// Chwytasz za uchwyt ⋮⋮, przesuwasz w górę/dół w polu albo do innego pola, puszczasz.
+// Nowa kolejność = środek między sąsiadami, więc zapisujemy zmianę tylko jednego zadania.
+let drag = null, renderAfterDrag = false;
+function startDrag(e, t, li) {
+  if (e.pointerType === "mouse" && e.button !== 0) return;
+  e.preventDefault();
+  const r = li.getBoundingClientRect();
+  const ghost = li.cloneNode(true); ghost.classList.add("drag-ghost");
+  Object.assign(ghost.style, { width: r.width + "px", left: r.left + "px", top: r.top + "px" });
+  document.body.append(ghost);
+  const ph = document.createElement("li"); ph.className = "drag-ph"; ph.style.height = r.height + "px";
+  li.after(ph); li.style.display = "none";
+  drag = { t, li, ghost, ph, dx: e.clientX - r.left, dy: e.clientY - r.top, x: e.clientX, y: e.clientY, raf: 0 };
+  document.body.classList.add("dragging");
+  window.addEventListener("pointermove", onDragMove, { passive: false });
+  window.addEventListener("pointerup", onDragEnd);
+  window.addEventListener("pointercancel", onDragCancel);
+  window.addEventListener("keydown", onDragKey);
+  drag.raf = requestAnimationFrame(autoScroll);
+}
+function onDragMove(e) {
+  if (!drag) return;
+  e.preventDefault();
+  drag.x = e.clientX; drag.y = e.clientY;
+  drag.ghost.style.left = (e.clientX - drag.dx) + "px"; drag.ghost.style.top = (e.clientY - drag.dy) + "px";
+  const under = document.elementFromPoint(e.clientX, e.clientY);
+  const box = under && under.closest(".box");
+  if (!box || box.hidden) return;
+  const ul = box.querySelector("ul");
+  const open = [...ul.children].filter((c) => c !== drag.li && c !== drag.ph && c.dataset.id && !c.classList.contains("done"));
+  const before = open.find((c) => { const rr = c.getBoundingClientRect(); return e.clientY < rr.top + rr.height / 2; });
+  if (before) ul.insertBefore(drag.ph, before);
+  else { const firstDone = [...ul.children].find((c) => c.classList.contains("done") && c !== drag.li); ul.insertBefore(drag.ph, firstDone || null); }
+}
+function autoScroll() {
+  if (!drag) return;
+  const edgeTop = 70, edgeBottom = innerHeight - 110;
+  if (drag.y < edgeTop) window.scrollBy(0, -Math.ceil((edgeTop - drag.y) / 5));
+  else if (drag.y > edgeBottom) window.scrollBy(0, Math.ceil((drag.y - edgeBottom) / 5));
+  drag.raf = requestAnimationFrame(autoScroll);
+}
+function endDragUi() {
+  cancelAnimationFrame(drag.raf);
+  drag.ghost.remove(); drag.li.style.display = "";
+  document.body.classList.remove("dragging");
+  window.removeEventListener("pointermove", onDragMove); window.removeEventListener("pointerup", onDragEnd);
+  window.removeEventListener("pointercancel", onDragCancel); window.removeEventListener("keydown", onDragKey);
+}
+function onDragEnd() {
+  if (!drag) return;
+  const { t, ph } = drag;
+  const box = ph.closest(".box");
+  const cat = box ? (fieldList().find((f) => "box-" + slug(f.id) === box.id) || {}).id : t.cat;
+  const byId = Object.fromEntries(todos().map((x) => [x.id, x]));
+  const sib = (dir) => { let n = ph[dir]; while (n && (!n.dataset.id || n === drag.li || (byId[n.dataset.id] && byId[n.dataset.id].done))) n = n[dir]; return n ? byId[n.dataset.id] : null; };
+  const prev = sib("previousElementSibling"), next = sib("nextElementSibling");
+  let order;
+  if (prev && next) order = (ord(prev) + ord(next)) / 2;
+  else if (prev) order = ord(prev) + 1000;
+  else if (next) order = ord(next) - 1000;
+  else order = Date.now();
+  ph.remove(); endDragUi(); drag = null;
+  if (cat && (cat !== t.cat || order !== ord(t))) {
+    lastUndo = [[t.id, strip(t)]];
+    write(t.id, strip({ ...t, cat, order, updated: Date.now() }));
+    if (cat !== t.cat) note(`Przeniesiono do ${fieldName(cat)}: ${t.text}`, false, true);
+  }
+  if (renderAfterDrag) { renderAfterDrag = false; render(); } else render();
+}
+function onDragCancel() { if (!drag) return; drag.ph.remove(); endDragUi(); drag = null; render(); }
+function onDragKey(e) { if (e.key === "Escape") onDragCancel(); }
 
 // Układ (siatka 6 kolumn): pola idą po kolei rzędami według szerokości; niepełny rząd jest rozciągany,
 // żeby nie było dziur. Zminimalizowane pola znikają z siatki i trafiają na granatową belkę.
@@ -698,6 +780,7 @@ function render() {
 }
 function renderInner() {
   if (!store) return;
+  if (drag) { renderAfterDrag = true; return; }   // nie przebudowuj listy pod palcem
   const a = document.activeElement;
   if (a && a.classList && (a.classList.contains("txt") || a.id === "motto")) return; // nie przeszkadzaj w edycji
   ensureSheet();
@@ -705,7 +788,7 @@ function renderInner() {
   const ids = fieldIds(), fb = fallbackField();
   for (const cat of ids) {
     const list = all.filter((t) => (ids.includes(t.cat) ? t.cat : fb) === cat)
-      .sort((x, y) => (x.done - y.done) || (x.created - y.created));
+      .sort((x, y) => (x.done - y.done) || (ord(x) - ord(y)));
     boxes[cat].ul.replaceChildren(...list.map(itemEl));
     const open = list.filter((t) => !t.done).length;
     boxes[cat].n.textContent = list.length ? open + " otwarte" : "";
@@ -760,9 +843,51 @@ $("clearDone").addEventListener("click", () => {
   const done = todos().filter((t) => t.done);
   if (!done.length) { note("Nie ma zrobionych zadań."); return; }
   lastUndo = done.map((t) => [t.id, strip(t)]);
-  for (const t of done) write(t.id, null);
-  note("Usunięto zrobione: " + done.length + ".", false, true);
+  for (const t of done) write(t.id, strip({ ...t, archived: true, archivedAt: Date.now(), doneAt: t.doneAt || t.updated || Date.now(), updated: Date.now() }));
+  note("Przeniesiono do archiwum: " + done.length + ".", false, true);
 });
+
+// ---------- archiwum zrobionych zadań ----------
+function openArchive() {
+  const dlg = $("archDlg"), body = $("archBody");
+  const q = document.createElement("input"); q.type = "search"; q.className = "arch-q"; q.placeholder = "Szukaj w archiwum…"; q.setAttribute("aria-label", "Szukaj w archiwum");
+  const list = document.createElement("div"); list.className = "arch-list";
+  const close = document.createElement("button"); close.type = "button"; close.className = "ghost"; close.textContent = "Zamknij";
+  close.addEventListener("click", () => { dlg.hidden = true; });
+  const paint = () => {
+    const needle = norm(q.value || "");
+    const items = archivedTodos().filter((t) => !needle || norm(t.text + " " + fieldName(t.cat)).includes(needle))
+      .sort((a, b) => (b.doneAt || b.archivedAt || 0) - (a.doneAt || a.archivedAt || 0));
+    if (!items.length) { list.replaceChildren(el("p", "muted", q.value ? "Nic nie znaleziono." : "Archiwum jest puste. Zrobione zadania trafią tu po kliknięciu „Archiwizuj zrobione”.")); return; }
+    const nodes = []; let lastDay = "";
+    for (const t of items) {
+      const d = new Date(t.doneAt || t.archivedAt || t.updated || 0);
+      const day = d.getDate() + " " + MONTHS_GEN[d.getMonth()] + " " + d.getFullYear();
+      if (day !== lastDay) { nodes.push(el("h3", "arch-day", "Zrobione " + day)); lastDay = day; }
+      const row = el("div", "arch-row");
+      const f = fieldList().find((x) => x.id === t.cat);
+      const tag = el("span", "arch-tag hc-" + (f ? fieldColor(f) : "slate"), f ? f.name : "usunięte pole");
+      const tx = el("span", "arch-text", t.text);
+      const back = el("button", "ghost", "Przywróć"); back.type = "button";
+      back.addEventListener("click", () => {
+        const target = fieldIds().includes(t.cat) ? t.cat : fallbackField();
+        write(t.id, strip({ ...t, cat: target, archived: false, done: false, doneAt: null, updated: Date.now() }));
+        note("Przywrócono do " + fieldName(target) + ": " + t.text); setTimeout(paint, 50);
+      });
+      const del = el("button", "x", "×"); del.type = "button"; del.setAttribute("aria-label", "Usuń na zawsze");
+      del.title = "Usuń na zawsze";
+      del.addEventListener("click", () => { lastUndo = [[t.id, strip(t)]]; write(t.id, null); note("Usunięto z archiwum: " + t.text, false, true); setTimeout(paint, 50); });
+      row.append(tag, tx, back, del); nodes.push(row);
+    }
+    list.replaceChildren(...nodes);
+  };
+  q.addEventListener("input", paint);
+  body.replaceChildren(el("h1", "", "Archiwum"), q, list, close);
+  paint();
+  dlg.hidden = false;
+}
+$("openArchive").addEventListener("click", openArchive);
+$("archDlg").addEventListener("click", (e) => { if (e.target === $("archDlg")) $("archDlg").hidden = true; });
 
 // ---------------- commands ----------------
 function run(text) {

@@ -77,14 +77,17 @@
       <ul class="helplist">
         <li><b>Mikrofon w rogu pola:</b> stuknij, powiedz zadanie i zamilknij — zapisze się w tym polu.</li>
         <li><b>+ dodaj zadanie:</b> wpisz i naciśnij Enter.</li>
-        <li><b>Kliknij treść zadania</b>, żeby ją poprawić; <b>×</b> usuwa, kwadracik odhacza.</li>
+        <li><b>Kliknij treść zadania</b>, żeby ją poprawić; <b>×</b> usuwa, kółko odhacza.</li>
+        <li><b>⋮⋮ przy zadaniu</b> — przeciągnij, żeby zmienić kolejność albo przenieść zadanie do innego pola.</li>
+        <li><b>Archiwizuj zrobione</b> przenosi odhaczone zadania do <b>Archiwum</b> (z datą zamknięcia).</li>
         <li><b>_</b> w nagłówku minimalizuje pole do granatowej belki na dole; przycisk na belce je przywraca.</li>
         <li><b>Kliknij nazwę pola</b>, żeby zmienić nazwę, szerokość, kolejność albo usunąć pole. <b>+ Dodaj pole</b> tworzy nowe.</li>
       </ul>
     </details>
     <div class="bar-actions">
       <button class="ghost tasks-only" id="addField" type="button">+ Dodaj pole</button>
-      <button class="ghost tasks-only" id="clearDone" type="button">Usuń zrobione</button>
+      <button class="ghost tasks-only" id="clearDone" type="button">Archiwizuj zrobione</button>
+      <button class="ghost tasks-only" id="openArchive" type="button">Archiwum</button>
       <button class="ghost" id="setPass" type="button" hidden>Ustaw hasło</button>
       <button class="ghost" id="logout" type="button" hidden>Wyloguj</button>
     </div>
@@ -198,6 +201,10 @@
     </div>
     <button class="ghost danger" type="button" id="evDelete">Usuń wydarzenie</button>
   </form>
+</div>
+
+<div class="login" id="archDlg" hidden>
+  <div class="login-card arch-card" id="archBody" role="dialog" aria-modal="true" aria-label="Archiwum"></div>
 </div>
 
 <div class="login" id="shareDlg" hidden>
