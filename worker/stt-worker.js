@@ -52,7 +52,7 @@ export default {
     fd.append("file", new Blob([audio], { type }), "nagranie." + ext);
     fd.append("model", env.MODEL || "gpt-4o-mini-transcribe");
     fd.append("language", "pl");
-    fd.append("prompt", "Lista zadań. Spółki: BIOTTS, NESTMEDIC, GENOMTEC, ORTHOGET, BIOACCURE, TRENDCAPITAL.");
+    fd.append("prompt", "Lista zadań. Spółki: BIOTTS, NESTMEDIC, GENOMTEC, ORTHOGET, BIOACCURE, TRENDCAPITAL. Pola: STATUS BETI, STATUS KAROL, STATUS BIOTTS.");
     fd.append("response_format", "json");
     const r = await fetch("https://api.openai.com/v1/audio/transcriptions", {
       method: "POST", headers: { Authorization: "Bearer " + env.OPENAI_API_KEY }, body: fd,

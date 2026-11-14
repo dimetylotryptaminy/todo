@@ -1,6 +1,7 @@
 // Rozpoznawanie poleceń (pisanych lub dyktowanych) — działa w całości na urządzeniu, także offline.
 
-export const CATS = ["BIOTTS", "NESTMEDIC", "GENOMTEC", "ORTHOGET", "BIOACCURE", "TRENDCAPITAL", "INNE"];
+export const CATS = ["INNE", "BIOTTS", "NESTMEDIC", "GENOMTEC", "ORTHOGET", "BIOACCURE", "TRENDCAPITAL", "STATUS BETI", "STATUS KAROL", "STATUS BIOTTS"];
+export const STATUS_CATS = ["STATUS BETI", "STATUS KAROL", "STATUS BIOTTS"];
 
 // Jak dyktowanie zwykle zapisuje nazwy spółek (bez spacji, bez polskich znaków).
 const ALIASES = {
@@ -11,6 +12,9 @@ const ALIASES = {
   BIOACCURE: ["bioaccure", "bioacure", "bioakur", "bioakiur", "bioakjur", "bioakure", "bioacur"],
   TRENDCAPITAL: ["trendcapital", "trendkapital", "trendcapitalu", "trendkapitalu", "trendkapitał"],
   INNE: ["inne", "inny", "innych", "innego", "inna", "pozostale", "inneo"],
+  "STATUS BETI": ["statusbeti", "statusbety", "statusbetty", "statusbetti", "statusbeta", "statusbecie"],
+  "STATUS KAROL": ["statuskarol", "statuskarola", "statuskarolu", "statuskarolowi"],
+  "STATUS BIOTTS": ["statusbiotts", "statusbiots", "statusbiotes", "statusbiotsa", "statusbiottsu"],
 };
 
 const VERBS = {

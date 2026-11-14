@@ -1,7 +1,7 @@
-import { CATS, parse, norm, catOf } from "./parser.js";
+import { CATS, STATUS_CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v33";
+const APP_VERSION = "v34";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -32,6 +32,7 @@ window.addEventListener("error", (e) => { try { note("Błąd: " + (e.message || 
 window.addEventListener("unhandledrejection", (e) => { try { note("Błąd: " + ((e.reason && (e.reason.code || e.reason.message)) || e.reason), true); } catch {} });
 const FB = "https://www.gstatic.com/firebasejs/10.12.2/";
 const $ = (id) => document.getElementById(id);
+const slug = (cat) => cat.toLowerCase().replace(/\s+/g, "-");   // „STATUS BETI” → „status-beti” (do id elementów)
 const lsGet = (k, d) => { try { const v = localStorage.getItem("tablica." + k); return v ? JSON.parse(v) : d; } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem("tablica." + k, JSON.stringify(v)); } catch {} };
 const newId = () => "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -338,8 +339,8 @@ function buildSheet() {
   sheet.append(strip);
   for (const cat of CATS) {
     const box = document.createElement("section");
-    box.className = "box" + (cat === "INNE" ? " inne" : "");
-    box.id = "box-" + cat.toLowerCase();
+    box.className = "box" + (cat === "INNE" ? " inne" : "") + (STATUS_CATS.includes(cat) ? " statusbox" : "");
+    box.id = "box-" + slug(cat);
     const h = document.createElement("h2");
     const name = document.createElement("span"); name.textContent = cat;
     const n = document.createElement("span"); n.className = "n";
@@ -352,7 +353,7 @@ function buildSheet() {
     h.append(name, right);
     const ul = document.createElement("ul");
     const add = document.createElement("input");
-    add.className = "add"; add.type = "text"; add.id = "add-" + cat.toLowerCase();
+    add.className = "add"; add.type = "text"; add.id = "add-" + slug(cat);
     add.placeholder = "+ dodaj zadanie"; add.setAttribute("enterkeyhint", "done");
     add.setAttribute("aria-label", "Dodaj zadanie do " + cat);
     add.addEventListener("keydown", (e) => {
@@ -386,7 +387,7 @@ function boxMic(cat) {
   const noSR = !(window.SpeechRecognition || window.webkitSpeechRecognition);
   const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const el = document.createElement(noSR && isIOS ? "label" : "button");
-  if (el.tagName === "LABEL") el.htmlFor = "add-" + cat.toLowerCase(); else el.type = "button";
+  if (el.tagName === "LABEL") el.htmlFor = "add-" + slug(cat); else el.type = "button";
   el.className = "boxmic"; el.dataset.cat = cat; el.innerHTML = micSvg;
   el.setAttribute("aria-label", "Dyktuj zadanie do " + cat);
   return el;
@@ -422,21 +423,28 @@ function itemEl(t) {
 // Schowane pola: znikają z siatki, a na górze tablicy zostaje etykieta (nazwa + liczba otwartych), która je odkrywa.
 function renderHidden() {
   const hidden = store.hidden || [];
-  let col = 0;
+  // Układ siatki (6 kolumn): INNE na całą szerokość, spółki po 2 w rzędzie, pola STATUS po 3 w rzędzie.
+  // Gdy część pól jest schowana, pozostałe dzielą rząd tak, żeby nie było dziur.
+  const visible = CATS.filter((c) => !hidden.includes(c));
+  const companies = visible.filter((c) => c !== "INNE" && !STATUS_CATS.includes(c));
+  const statuses = visible.filter((c) => STATUS_CATS.includes(c));
+  const span = {};
+  visible.forEach((c) => { span[c] = c === "INNE" ? 6 : STATUS_CATS.includes(c) ? 2 : 3; });
+  if (companies.length % 2 === 1) span[companies[companies.length - 1]] = 6;
+  if (statuses.length === 1) span[statuses[0]] = 6;
+  if (statuses.length === 2) statuses.forEach((c) => { span[c] = 3; });
+  let pos = 0;
   for (const cat of CATS) {
-    const box = $("box-" + cat.toLowerCase());
-    const isHidden = hidden.includes(cat);
-    box.hidden = isHidden;
-    box.classList.remove("col2", "wide");
-    if (isHidden || cat === "INNE") continue;
-    if (col === 1) box.classList.add("col2");
-    col = 1 - col;
+    const box = $("box-" + slug(cat));
+    box.hidden = hidden.includes(cat);
+    box.classList.remove("col2", "wide", "span2", "span3");
+    if (box.hidden) continue;
+    const w = span[cat];
+    if (pos + w > 6) pos = 0;
+    box.classList.add(w === 6 ? "wide" : w === 2 ? "span2" : "span3");
+    pos += w;
+    if (pos === 6) { box.classList.add("col2"); pos = 0; }      // ostatnie w rzędzie: bez prawej linii
   }
-  // nieparzysta liczba widocznych pól spółek: ostatnie zajmuje całą szerokość
-  const visible = CATS.filter((c) => c !== "INNE" && !hidden.includes(c));
-  if (visible.length % 2 === 1) $("box-" + visible[visible.length - 1].toLowerCase()).classList.add("wide");
-  // INNE schowane: dolna linia ostatniego widocznego pola zamyka siatkę nad stopką
-  $("sheet").classList.toggle("inne-hidden", hidden.includes("INNE"));
 
   const strip = $("hiddenStrip");
   strip.hidden = !hidden.length;
@@ -593,13 +601,13 @@ if (IOS && !SR) {
 
   const setTarget = (text) => {
     clearTargets();
-    if (targetCat) { $("box-" + targetCat.toLowerCase()).classList.add("target"); return; }
+    if (targetCat) { $("box-" + slug(targetCat)).classList.add("target"); return; }
     const m = norm(text).match(/^(dodaj|dopisz|wpisz|zapisz)\s+(?:do\s+)?(.+)/);
     if (!m) return;
     const cat = catOf(m[2]);
-    if (cat) $("box-" + cat.toLowerCase()).classList.add("target");
+    if (cat) $("box-" + slug(cat)).classList.add("target");
   };
-  const field = () => targetCat ? $("add-" + targetCat.toLowerCase()) : $("cmd");
+  const field = () => targetCat ? $("add-" + slug(targetCat)) : $("cmd");
   const show = (interim = "") => { const t = (buffer + " " + interim).trim(); field().value = t; setTarget(t); };
 
   function addToTarget(text) {
@@ -843,7 +851,7 @@ const cloud = { rec: null };   // trwające nagranie: {btn, cat, mr, stream, ctx
 
 function cloudSetTarget(cat) {
   document.querySelectorAll(".box.target").forEach((b) => b.classList.remove("target"));
-  if (cat) $("box-" + cat.toLowerCase()).classList.add("target");
+  if (cat) $("box-" + slug(cat)).classList.add("target");
 }
 function cloudBtnOff(btn) { btn.classList.remove("on"); }
 
