@@ -1,7 +1,7 @@
 import { CATS, STATUS_CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v35";
+const APP_VERSION = "v36";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -513,7 +513,7 @@ function renderStatus() {
   if (store.meta.local) span("Tryb lokalny: zadania są tylko na tym urządzeniu.", "warn");
   else if (!navigator.onLine) span("Offline: zmiany wyślą się po połączeniu.", "warn");
   else if (store.meta.pending) span("Zapisuję…");
-  else if (store.email) span("Zsynchronizowano · " + store.email, "ok");
+  // „Zsynchronizowano” nie zajmuje już miejsca na dole — e-mail konta widać w stopce tablicy
   if (noteMsg) {
     span(noteMsg, noteWarn ? "warn" : "");
     if (noteUndo && lastUndo) {
@@ -845,14 +845,6 @@ $("cmd").addEventListener("focus", () => {
 });
 $("cmd").addEventListener("blur", () => { clearInterval(kTimer); });
 
-// Skróty klawiszowe (komputer): „/” — pole poleceń, „M” — mikrofon. Działają, gdy nie piszesz w polu.
-document.addEventListener("keydown", (e) => {
-  const a = document.activeElement;
-  const typing = a && (a.tagName === "INPUT" || a.isContentEditable);
-  if (typing || e.metaKey || e.ctrlKey || e.altKey || !$("login").hidden) return;
-  if (e.key === "/") { e.preventDefault(); $("cmd").focus(); }
-  if ((e.key === "m" || e.key === "M") && !$("mic").hidden) { e.preventDefault(); $("mic").click(); }
-});
 
 // ---------------- rozpoznawanie mowy przez serwer (OpenAI) ----------------
 // Gdy w config.js jest STT_URL, mikrofony nagrywają dźwięk i wysyłają go do naszego serwera (Cloudflare Worker),

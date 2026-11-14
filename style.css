@@ -30,7 +30,7 @@ body {
   padding-left: max(16px, env(safe-area-inset-left, 0px));
   padding-right: max(16px, env(safe-area-inset-right, 0px));
   padding-top: max(16px, env(safe-area-inset-top, 0px));
-  padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
 }
 [hidden] { display: none !important; }
 .wrap { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
@@ -233,10 +233,15 @@ li.done .txt { color: var(--done); text-decoration: line-through; }
   min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--navy-ink); color: var(--navy);
   font-size: 11px; letter-spacing: 0; display: inline-grid; place-items: center; font-variant-numeric: tabular-nums;
 }
-body.has-taskbar { padding-bottom: calc(200px + env(safe-area-inset-bottom, 0px)); }
+body.has-taskbar { padding-bottom: calc(130px + env(safe-area-inset-bottom, 0px)); }
 
 /* animacja minimalizacji / przywracania */
 .box.minimizing { transition: transform .2s ease-in, opacity .2s ease-in; transform: translateY(40px) scale(.9); opacity: 0; }
 .box.restoring { animation: restore .26s ease-out; }
 @keyframes restore { from { transform: translateY(40px) scale(.92); opacity: 0; } to { transform: none; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .box.minimizing, .box.restoring { transition: none; animation: none; } }
+
+/* Pasek poleceń (pole tekstowe, „Wykonaj”, dolny mikrofon) usunięty z widoku — zostają komunikaty i belka.
+   Dolny pasek znika całkiem, gdy nie ma ani komunikatu, ani zminimalizowanych pól. */
+.cmd { display: none !important; }
+.top:not(:has(.status:not(:empty))):not(:has(.taskbar:not([hidden]))) { display: none; }
