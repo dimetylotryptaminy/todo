@@ -56,10 +56,15 @@
     <nav class="taskbar" id="taskbar" aria-label="Zminimalizowane pola" hidden></nav>
   </header>
 
+  <nav class="tabs" role="tablist" aria-label="Widok">
+    <button class="tab" id="tabTasks" role="tab" type="button" aria-controls="sheet">ZADANIA</button>
+    <button class="tab" id="tabCal" role="tab" type="button" aria-controls="calendar">KALENDARZ</button>
+  </nav>
   <main class="sheet" id="sheet"></main>
+  <section class="cal" id="calendar" hidden aria-label="Kalendarz roczny"></section>
 
   <div class="bar">
-    <details class="help">
+    <details class="help tasks-only">
       <summary>Jak używać</summary>
       <ul class="helplist">
         <li><b>Mikrofon w rogu pola:</b> stuknij, powiedz zadanie i zamilknij — zapisze się w tym polu.</li>
@@ -70,8 +75,8 @@
       </ul>
     </details>
     <div class="bar-actions">
-      <button class="ghost" id="addField" type="button">+ Dodaj pole</button>
-      <button class="ghost" id="clearDone" type="button">Usuń zrobione</button>
+      <button class="ghost tasks-only" id="addField" type="button">+ Dodaj pole</button>
+      <button class="ghost tasks-only" id="clearDone" type="button">Usuń zrobione</button>
       <button class="ghost" id="setPass" type="button" hidden>Ustaw hasło</button>
       <button class="ghost" id="logout" type="button" hidden>Wyloguj</button>
     </div>
@@ -159,6 +164,32 @@
       <button class="ghost" type="button" id="fieldCancel">Anuluj</button>
     </div>
     <button class="ghost danger" type="button" id="fieldDelete">Usuń pole</button>
+  </form>
+</div>
+
+<div class="login" id="evDlg" hidden>
+  <form class="login-card" id="evForm" autocomplete="off">
+    <h1 id="evTitle">Nowe wydarzenie</h1>
+    <label for="evName">Co</label>
+    <input id="evName" type="text" maxlength="80" required placeholder="np. Chorwacja, Ania i Tomek u nas, Delegacja Berlin">
+    <span class="flabel">Rodzaj</span>
+    <div class="kinds" role="radiogroup" aria-label="Rodzaj wydarzenia">
+      <label class="kind k-trip"><input type="radio" name="evKind" value="trip"><span>Wyjazd</span></label>
+      <label class="kind k-guest"><input type="radio" name="evKind" value="guest"><span>Przyjazd gości</span></label>
+      <label class="kind k-work"><input type="radio" name="evKind" value="work"><span>Delegacja</span></label>
+      <label class="kind k-holiday"><input type="radio" name="evKind" value="holiday"><span>Wakacje</span></label>
+      <label class="kind k-other"><input type="radio" name="evKind" value="other"><span>Inne</span></label>
+    </div>
+    <div class="evdates">
+      <div><label for="evStart">Od</label><input id="evStart" type="date" required></div>
+      <div><label for="evEnd">Do</label><input id="evEnd" type="date" required></div>
+    </div>
+    <p class="login-err" id="evErr" aria-live="polite"></p>
+    <div class="login-actions">
+      <button class="btn" type="submit">Zapisz</button>
+      <button class="ghost" type="button" id="evCancel">Anuluj</button>
+    </div>
+    <button class="ghost danger" type="button" id="evDelete">Usuń wydarzenie</button>
   </form>
 </div>
 

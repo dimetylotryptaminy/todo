@@ -1,7 +1,7 @@
 import { parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v38";
+const APP_VERSION = "v39";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -619,6 +619,7 @@ function render() {
   wk.textContent = w.week + "/" + w.total;
   const s = document.createElement("small"); s.textContent = w.range + " · " + APP_VERSION + (store.meta.local ? " · lokalnie" : store.email ? " · " + store.email : ""); wk.append(s);
   $("motto").textContent = store.motto;
+  if (view === "calendar") renderCalendar();
   renderStatus();
 }
 document.addEventListener("focusout", () => setTimeout(render, 0));
@@ -1080,6 +1081,8 @@ async function transcribe(blob, cat, btn) {
       return;
     }
     let text = String(data.text || "").trim();
+    // przy ciszy/szumie rozpoznawanie potrafi „oddać” tekst podpowiedzi zamiast mowy — takie wyniki pomijamy
+    if (/lista zadań\.?\s*(spółki|pola)|spółki:\s*biotts,\s*nestmedic/i.test(text)) text = "";
     dbg("stt: " + text);
     const cut = trailingEndWord(text); if (cut >= 0) text = text.slice(0, cut);
     text = text.replace(/^[\s:,\-–—]+|[\s,.;:!?\-–—]+$/g, "");
@@ -1167,6 +1170,198 @@ if (new URL(location.href).searchParams.has("v")) {
   const u = new URL(location.href); u.searchParams.delete("v");
   history.replaceState(null, "", u.pathname + (u.search ? u.search : "") + u.hash);
 }
+
+
+// ======================= KALENDARZ ROCZNY =======================
+// Wydarzenia (wyjazdy, przyjazdy, delegacje, wakacje…) są zapisywane tak jak zadania (ten sam zbiór na koncie,
+// ta sama kolejka offline), tylko z typem "event": {type, title, kind, start: "RRRR-MM-DD", end: "RRRR-MM-DD"}.
+const KINDS = { trip: "Wyjazd", guest: "Przyjazd gości", work: "Delegacja", holiday: "Wakacje", other: "Inne" };
+const MONTHS = ["Styczeń", "Luty", "Marzec", "Kwiecień", "Maj", "Czerwiec", "Lipiec", "Sierpień", "Wrzesień", "Październik", "Listopad", "Grudzień"];
+const MONTHS_GEN = ["stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca", "lipca", "sierpnia", "września", "października", "listopada", "grudnia"];
+const WD = ["Pn", "Wt", "Śr", "Cz", "Pt", "So", "Nd"];
+const events = () => Object.entries(store.items).filter(([, d]) => d && d.type === "event").map(([id, d]) => ({ id, ...d }));
+const pad = (n) => String(n).padStart(2, "0");
+const iso = (d) => d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+const parseISO = (s) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
+const todayISO = () => iso(new Date());
+
+// Święta ustawowo wolne w Polsce (stałe + ruchome od Wielkanocy).
+function easter(y) {
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25),
+    g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4,
+    l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451), mo = Math.floor((h + l - 7 * m + 114) / 31),
+    da = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(y, mo - 1, da);
+}
+function holidays(y) {
+  const out = {}, add = (d, n) => { out[iso(d)] = n; };
+  [[1, 1, "Nowy Rok"], [1, 6, "Trzech Króli"], [5, 1, "Święto Pracy"], [5, 3, "Święto Konstytucji 3 Maja"], [8, 15, "Wniebowzięcie NMP"],
+   [11, 1, "Wszystkich Świętych"], [11, 11, "Święto Niepodległości"], [12, 25, "Boże Narodzenie"], [12, 26, "Drugi dzień Świąt"]]
+    .forEach(([m, d, n]) => add(new Date(y, m - 1, d), n));
+  if (y >= 2025) add(new Date(y, 11, 24), "Wigilia");
+  const e = easter(y), shift = (n) => new Date(e.getFullYear(), e.getMonth(), e.getDate() + n);
+  add(e, "Wielkanoc"); add(shift(1), "Poniedziałek Wielkanocny"); add(shift(49), "Zielone Świątki"); add(shift(60), "Boże Ciało");
+  return out;
+}
+
+let calYear = new Date().getFullYear();
+const fmtRange = (ev) => {
+  const a = parseISO(ev.start), b = parseISO(ev.end);
+  if (ev.start === ev.end) return a.getDate() + " " + MONTHS_GEN[a.getMonth()];
+  if (a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear()) return a.getDate() + "–" + b.getDate() + " " + MONTHS_GEN[a.getMonth()];
+  return a.getDate() + " " + MONTHS_GEN[a.getMonth()] + " – " + b.getDate() + " " + MONTHS_GEN[b.getMonth()] + (a.getFullYear() !== b.getFullYear() ? " " + b.getFullYear() : "");
+};
+const days = (ev) => Math.round((parseISO(ev.end) - parseISO(ev.start)) / 864e5) + 1;
+
+function evChip(ev, withDates) {
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "evchip k-" + (KINDS[ev.kind] ? ev.kind : "other");
+  b.title = KINDS[ev.kind] || "Inne";
+  const dot = document.createElement("span"); dot.className = "evdot"; dot.setAttribute("aria-hidden", "true");
+  const t = document.createElement("span"); t.className = "evtext";
+  t.textContent = (withDates ? fmtRange(ev) + " · " : (ev.start === ev.end ? parseISO(ev.start).getDate() : parseISO(ev.start).getDate() + "–" + parseISO(ev.end).getDate()) + " · ") + ev.title;
+  b.append(dot, t);
+  b.setAttribute("aria-label", "Edytuj: " + ev.title + ", " + fmtRange(ev));
+  b.addEventListener("click", () => openEventDialog(ev.id));
+  return b;
+}
+
+function renderCalendar() {
+  const root = $("calendar");
+  const evs = events().filter((e) => e.start && e.end).sort((a, b) => a.start.localeCompare(b.start) || a.end.localeCompare(b.end));
+  const today = todayISO();
+  const hol = holidays(calYear);
+
+  // nagłówek: rok + dodawanie
+  const head = document.createElement("div"); head.className = "cal-head";
+  const prev = document.createElement("button"); prev.type = "button"; prev.className = "yearbtn"; prev.textContent = "‹"; prev.setAttribute("aria-label", "Poprzedni rok");
+  prev.addEventListener("click", () => { calYear--; renderCalendar(); });
+  const yr = document.createElement("h2"); yr.className = "cal-year"; yr.textContent = calYear;
+  const next = document.createElement("button"); next.type = "button"; next.className = "yearbtn"; next.textContent = "›"; next.setAttribute("aria-label", "Następny rok");
+  next.addEventListener("click", () => { calYear++; renderCalendar(); });
+  const yearBox = document.createElement("div"); yearBox.className = "yearnav"; yearBox.append(prev, yr, next);
+  const addBtn = document.createElement("button"); addBtn.type = "button"; addBtn.className = "btn cal-add"; addBtn.textContent = "+ Dodaj wydarzenie";
+  addBtn.addEventListener("click", () => openEventDialog(null, today.startsWith(String(calYear)) ? today : calYear + "-01-01"));
+  head.append(yearBox, addBtn);
+
+  // legenda
+  const legend = document.createElement("div"); legend.className = "legend";
+  for (const [k, n] of Object.entries(KINDS)) { const s = document.createElement("span"); s.className = "lg k-" + k; s.innerHTML = '<i aria-hidden="true"></i>'; s.append(n); legend.append(s); }
+
+  // najbliższe
+  const upcoming = evs.filter((e) => e.end >= today).slice(0, 5);
+  const up = document.createElement("div"); up.className = "upcoming";
+  const upH = document.createElement("h3"); upH.textContent = "Najbliższe"; up.append(upH);
+  if (!upcoming.length) { const p = document.createElement("p"); p.className = "muted"; p.textContent = "Brak zaplanowanych wydarzeń. Stuknij dzień w kalendarzu albo „+ Dodaj wydarzenie”."; up.append(p); }
+  else upcoming.forEach((e) => up.append(evChip(e, true)));
+
+  // 12 miesięcy
+  const grid = document.createElement("div"); grid.className = "months";
+  for (let m = 0; m < 12; m++) {
+    const mon = document.createElement("section"); mon.className = "month";
+    const first = new Date(calYear, m, 1), last = new Date(calYear, m + 1, 0);
+    const mStart = iso(first), mEnd = iso(last);
+    if (today >= mStart && today <= mEnd) mon.classList.add("current");
+    const h = document.createElement("h3"); h.textContent = MONTHS[m]; mon.append(h);
+    const tbl = document.createElement("div"); tbl.className = "mgrid";
+    WD.forEach((w, i) => { const c = document.createElement("span"); c.className = "wd" + (i >= 5 ? " we" : ""); c.textContent = w; tbl.append(c); });
+    const lead = (first.getDay() + 6) % 7;
+    for (let i = 0; i < lead; i++) tbl.append(document.createElement("span"));
+    for (let d = 1; d <= last.getDate(); d++) {
+      const date = new Date(calYear, m, d), key = iso(date);
+      const on = evs.filter((e) => e.start <= key && e.end >= key);
+      const cell = document.createElement("button"); cell.type = "button"; cell.className = "day";
+      if ((date.getDay() + 6) % 7 >= 5) cell.classList.add("we");
+      if (hol[key]) { cell.classList.add("hol"); }
+      if (key === today) cell.classList.add("today");
+      if (on.length) {
+        const k = KINDS[on[0].kind] ? on[0].kind : "other";
+        cell.classList.add("has", "k-" + k);
+        if (on[0].start === key) cell.classList.add("s");
+        if (on[0].end === key) cell.classList.add("e");
+        if (on.length > 1) cell.classList.add("multi");
+      }
+      cell.textContent = d;
+      const label = d + " " + MONTHS_GEN[m] + (hol[key] ? ", " + hol[key] : "") + (on.length ? ": " + on.map((e) => e.title).join(", ") : "");
+      cell.setAttribute("aria-label", label); cell.title = label;
+      cell.addEventListener("click", () => { if (on.length === 1) openEventDialog(on[0].id); else openEventDialog(null, key); });
+      tbl.append(cell);
+    }
+    mon.append(tbl);
+    const list = document.createElement("div"); list.className = "mlist";
+    evs.filter((e) => e.start <= mEnd && e.end >= mStart).forEach((e) => list.append(evChip(e, false)));
+    const holList = Object.entries(hol).filter(([k]) => k >= mStart && k <= mEnd);
+    if (holList.length) {
+      const hl = document.createElement("p"); hl.className = "hols";
+      hl.textContent = holList.map(([k, n]) => parseISO(k).getDate() + " " + n).join(" · ");
+      list.append(hl);
+    }
+    mon.append(list);
+    grid.append(mon);
+  }
+  root.replaceChildren(head, legend, up, grid);
+}
+
+// ---------- okno wydarzenia ----------
+let evEditing = null, evDeleteArmed = false;
+function openEventDialog(id, dateISO) {
+  evEditing = id;
+  const ev = id ? events().find((e) => e.id === id) : { title: "", kind: "trip", start: dateISO, end: dateISO };
+  $("evTitle").textContent = id ? "Edytuj wydarzenie" : "Nowe wydarzenie";
+  $("evName").value = ev.title || "";
+  document.querySelectorAll('input[name="evKind"]').forEach((r) => { r.checked = r.value === (ev.kind || "trip"); });
+  $("evStart").value = ev.start; $("evEnd").value = ev.end;
+  $("evDelete").hidden = !id;
+  evDeleteArmed = false; $("evDelete").textContent = "Usuń wydarzenie"; $("evDelete").classList.remove("armed");
+  $("evErr").textContent = "";
+  $("evDlg").hidden = false;
+  setTimeout(() => $("evName").focus(), 30);
+}
+const closeEventDialog = () => { $("evDlg").hidden = true; evEditing = null; };
+$("evCancel").addEventListener("click", closeEventDialog);
+$("evDlg").addEventListener("click", (e) => { if (e.target === $("evDlg")) closeEventDialog(); });
+$("evStart").addEventListener("change", () => { if (!$("evEnd").value || $("evEnd").value < $("evStart").value) $("evEnd").value = $("evStart").value; });
+$("evForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const title = $("evName").value.trim();
+  const start = $("evStart").value, end = $("evEnd").value || start;
+  const kind = (document.querySelector('input[name="evKind"]:checked') || {}).value || "other";
+  if (!title) { $("evErr").textContent = "Wpisz, co to za wydarzenie."; return; }
+  if (!start) { $("evErr").textContent = "Wybierz datę początku."; return; }
+  if (end < start) { $("evErr").textContent = "Data „Do” jest wcześniejsza niż „Od”."; return; }
+  const prevEv = evEditing ? events().find((x) => x.id === evEditing) : null;
+  const id = evEditing || newId();
+  write(id, { type: "event", title, kind, start, end, created: prevEv ? prevEv.created : Date.now(), updated: Date.now() });
+  lastUndo = [[id, prevEv ? strip(prevEv) : null]];
+  note((prevEv ? "Zapisano: " : "Dodano: ") + title + " (" + fmtRange({ start, end }) + ")", false, true);
+  if (start.slice(0, 4) !== String(calYear)) calYear = Number(start.slice(0, 4));
+  closeEventDialog();
+});
+$("evDelete").addEventListener("click", () => {
+  if (!evDeleteArmed) { evDeleteArmed = true; $("evDelete").classList.add("armed"); $("evDelete").textContent = "Tak, usuń wydarzenie"; return; }
+  const ev = events().find((x) => x.id === evEditing);
+  if (ev) { lastUndo = [[ev.id, strip(ev)]]; write(ev.id, null); note("Usunięto: " + ev.title, false, true); }
+  closeEventDialog();
+});
+
+// ---------- zakładki ZADANIA / KALENDARZ ----------
+let view = location.hash === "#kalendarz" ? "calendar" : lsGet("view", "tasks");
+function setView(v) {
+  view = v; lsSet("view", v);
+  history.replaceState(null, "", location.pathname + location.search + (v === "calendar" ? "#kalendarz" : ""));
+  applyView();
+}
+function applyView() {
+  const cal = view === "calendar";
+  $("sheet").hidden = cal; $("calendar").hidden = !cal;
+  document.body.classList.toggle("view-calendar", cal);
+  $("tabTasks").setAttribute("aria-selected", String(!cal)); $("tabCal").setAttribute("aria-selected", String(cal));
+  $("tabTasks").classList.toggle("active", !cal); $("tabCal").classList.toggle("active", cal);
+  if (cal && store) renderCalendar();
+}
+$("tabTasks").addEventListener("click", () => setView("tasks"));
+$("tabCal").addEventListener("click", () => setView("calendar"));
+applyView();
 
 // ---------------- boot ----------------
 buildSheet();
