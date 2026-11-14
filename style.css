@@ -499,3 +499,12 @@ body.view-calendar .wrap { max-width: 1480px; }
 .cal-add:active { background: #164a95; }
 .yearbtn:disabled { opacity: .3; cursor: default; }
 .yearbtn:disabled:hover { border-color: var(--hair); color: var(--ink); }
+
+/* znaczniki świąt PL / ES */
+.htag { display: inline-block; font: 700 8.5px/1 var(--font); letter-spacing: .04em; padding: 2px 3px; border-radius: 3px; vertical-align: 1px; color: #fff; }
+.htag.pl { background: #c0392b; }
+.htag.es { background: #d4a20f; color: #3a2a00; }
+.wtxt.hol.es { color: #9a6d00; }
+.legend .htag { margin-right: 2px; }
+.wcol.single .htag { font-size: 10px; }
+@media (prefers-color-scheme: dark) { .wtxt.hol.es { color: #e6bd4c; } }

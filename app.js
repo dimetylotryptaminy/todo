@@ -1,7 +1,7 @@
 import { parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v47";
+const APP_VERSION = "v48";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -1208,6 +1208,18 @@ function holidays(y) {
   return out;
 }
 
+// Święta w Hiszpanii — ogólnokrajowe dni wolne (fiestas nacionales) + Wielki Czwartek, wolny prawie we wszystkich
+// regionach (poza Katalonią i Walencją). Święta regionalne i lokalne nie są tu ujęte.
+function holidaysES(y) {
+  const out = {}, add = (d, n) => { out[iso(d)] = n; };
+  [[1, 1, "Año Nuevo"], [1, 6, "Epifanía (Reyes)"], [5, 1, "Fiesta del Trabajo"], [8, 15, "Asunción de la Virgen"],
+   [10, 12, "Fiesta Nacional de España"], [11, 1, "Todos los Santos"], [12, 6, "Día de la Constitución"],
+   [12, 8, "Inmaculada Concepción"], [12, 25, "Navidad"]].forEach(([m, d, n]) => add(new Date(y, m - 1, d), n));
+  const e = easter(y), shift = (n) => new Date(e.getFullYear(), e.getMonth(), e.getDate() + n);
+  add(shift(-3), "Jueves Santo"); add(shift(-2), "Viernes Santo");
+  return out;
+}
+
 // Kalendarz zaczyna się od 2027 roku (wcześniejszych lat nie pokazujemy).
 const CAL_MIN_YEAR = 2027;
 let calYear = Math.max(new Date().getFullYear(), CAL_MIN_YEAR);
@@ -1256,7 +1268,12 @@ function renderCalendarInner() {
   const root = $("calendar");
   const evs = events().filter((e) => e.start && e.end).sort((a, b) => a.start.localeCompare(b.start) || a.end.localeCompare(b.end));
   const today = todayISO();
-  const hol = holidays(calYear);
+  // święta: polskie (PL) i hiszpańskie (ES); dzień może mieć oba
+  const holPL = holidays(calYear), holES = holidaysES(calYear);
+  const hol = {};
+  for (const [k, n] of Object.entries(holPL)) (hol[k] = hol[k] || []).push({ c: "PL", n });
+  for (const [k, n] of Object.entries(holES)) (hol[k] = hol[k] || []).push({ c: "ES", n });
+  const holText = (k) => hol[k].map((h) => h.c + " " + h.n).join(" · ");
 
   // nagłówek: rok + dodawanie
   const head = document.createElement("div"); head.className = "cal-head";
@@ -1274,6 +1291,7 @@ function renderCalendarInner() {
   // legenda
   const legend = document.createElement("div"); legend.className = "legend";
   for (const [k, n] of Object.entries(KINDS)) { const s = document.createElement("span"); s.className = "lg k-" + k; s.innerHTML = '<i aria-hidden="true"></i>'; s.append(n); legend.append(s); }
+  for (const [c, n] of [["pl", "święta w Polsce"], ["es", "święta w Hiszpanii"]]) { const s = document.createElement("span"); s.className = "lg"; s.innerHTML = '<b class="htag ' + c + '">' + c.toUpperCase() + '</b>'; s.append(n); legend.append(s); }
 
   // najbliższe
   const upcoming = evs.filter((e) => e.end >= today).slice(0, phoneCal() ? 3 : 5);
@@ -1313,10 +1331,15 @@ function renderCalendarInner() {
       const txt = document.createElement("span"); txt.className = "wtxt";
       const starting = on.filter((e) => e.start === key || d === 1);
       if (starting.length) txt.textContent = starting.map((e) => e.title).join(" · ");
-      else if (hol[key]) { txt.textContent = hol[key]; txt.classList.add("hol"); }
+      else if (hol[key]) {
+        // najpierw znaczniki (PL, ES), potem nazwy — w wąskiej kolumnie oba znaczniki są zawsze widoczne
+        hol[key].forEach((h) => { const tag = document.createElement("b"); tag.className = "htag " + h.c.toLowerCase(); tag.textContent = h.c; txt.append(tag, " "); });
+        txt.append(hol[key].map((h) => h.n).join(" / "));
+        txt.classList.add("hol"); if (hol[key].every((h) => h.c === "ES")) txt.classList.add("es");
+      }
       cell.append(num, wd, txt);
       if (dow === 1) { const wk = document.createElement("span"); wk.className = "wweek"; wk.textContent = isoWeek(date).week; cell.append(wk); }
-      const label = d + " " + MONTHS_GEN[m] + (hol[key] ? ", " + hol[key] : "") + (on.length ? ": " + on.map((e) => e.title).join(", ") : "");
+      const label = d + " " + MONTHS_GEN[m] + (hol[key] ? ", " + holText(key) : "") + (on.length ? ": " + on.map((e) => e.title).join(", ") : "");
       cell.setAttribute("aria-label", label); cell.title = label;
       cell.addEventListener("click", () => { if (on.length === 1) openEventDialog(on[0].id); else openEventDialog(null, key); });
       col.append(cell);
