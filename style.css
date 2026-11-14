@@ -727,21 +727,3 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none 
   background: var(--ink);
   -webkit-mask: url("motto.png") right center / contain no-repeat; mask: url("motto.png") right center / contain no-repeat;
 }
-
-/* data i tydzień jako dyskretna etykieta na końcu przełącznika zakładek; motto większe, po prawej */
-.tabs .ti-date { display: flex; align-items: center; padding: 0 14px 0 16px; margin-left: 4px; border-left: 1px solid color-mix(in srgb, var(--ink) 14%, transparent);
-  font-size: 13px; color: var(--ink-soft); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.topline { align-items: center; }
-.topinfo { justify-content: center; }
-.ti-motto.hand { width: 440px; }
-@media (max-width: 1100px) { .ti-motto.hand { width: 360px; } }
-@media (max-width: 900px) { .tabs .ti-date { display: none; } }
-@media (max-width: 760px) {
-  .topinfo { padding: 6px 0 2px; }
-  .ti-motto.hand { width: min(360px, 90vw); }
-}
-/* motto zawsze w osobnym wierszu nad zakładkami, wyśrodkowane (jak nagłówek listu) */
-.topinfo { order: -1; width: 100%; align-items: center; text-align: center; padding: 4px 0 0; }
-.ti-motto.hand { width: 460px; -webkit-mask-position: center; mask-position: center; }
-.tabs { align-items: center; }
-@media (max-width: 760px) { .ti-motto.hand { width: min(360px, 90vw); } }
