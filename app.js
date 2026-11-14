@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v55";
+const APP_VERSION = "v56";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -118,6 +118,10 @@ async function firebaseStore(config) {
     },
     // słówka dnia: users/{uid}/daily/{RRRR-MM-DD} = {es: [...], en: [...]}; historia słów w users/{uid}.wordHistory
     wordHistory: { es: [], en: [] },
+    async listDaily() {
+      const qs = await F.getDocs(F.collection(db, "users", s.uid, "daily"));
+      const out = []; qs.forEach((d) => out.push({ date: d.id, ...d.data() })); return out;
+    },
     async getDaily(date) { const d = await F.getDoc(F.doc(db, "users", s.uid, "daily", date)); return d.exists() ? d.data() : null; },
     async setDaily(date, data) {
       await F.setDoc(F.doc(db, "users", s.uid, "daily", date), data);
@@ -1568,7 +1572,7 @@ async function wordsFor(d, isToday, force = false) {
   const key = iso(d);
   const cache = lsGet(wordsCacheKey(), {});
   if (cache[key] && !force) return { ...cache[key], source: "ai" };
-  const save = (w) => { const c = lsGet(wordsCacheKey(), {}); c[key] = { es: w.es, en: w.en }; const ks = Object.keys(c).sort(); while (ks.length > 120) delete c[ks.shift()]; lsSet(wordsCacheKey(), c); };
+  const save = (w) => { const c = lsGet(wordsCacheKey(), {}); c[key] = { es: w.es, en: w.en }; const ks = Object.keys(c).sort(); while (ks.length > 1500) delete c[ks.shift()]; lsSet(wordsCacheKey(), c); };
   const cloud = store && store.getDaily && store.uid;
   if (cloud && navigator.onLine) {
     if (!force) {
@@ -1647,7 +1651,53 @@ async function renderWords(force = false) {
     back.addEventListener("click", () => { wordsOffset = 0; renderWords(); });
     nodes.push(back);
   }
+  const hist = document.createElement("section"); hist.className = "whist"; hist.setAttribute("aria-label", "Poprzednie słówka");
+  nodes.push(hist);
   root.replaceChildren(...nodes);
+  renderWordHistory(hist, iso(d), seq);
+}
+
+// Lista poprzednich słówek (drobnym tekstem): data · słówko hiszpańskie · słówko angielskie.
+// Kliknięcie przenosi do tamtego dnia — z oboma słówkami i przykładami.
+async function renderWordHistory(box, shownDate, seq) {
+  const today = iso(new Date());
+  const byDate = {};
+  for (const [k, w] of Object.entries(lsGet(wordsCacheKey(), {}))) if (w && w.es && w.en) byDate[k] = w;
+  const paint = () => {
+    const days = Object.keys(byDate).filter((k) => k < today).sort().reverse();
+    if (!days.length) { box.replaceChildren(); return; }
+    const h = document.createElement("h3"); h.textContent = "Poprzednie słówka";
+    const list = document.createElement("ol"); list.className = "whist-list";
+    for (const k of days) {
+      const w = byDate[k], dt = parseISO(k);
+      const li = document.createElement("li");
+      const b = document.createElement("button"); b.type = "button"; b.className = "whist-item" + (k === shownDate ? " on" : "");
+      const dd = document.createElement("span"); dd.className = "wh-date"; dd.textContent = dt.getDate() + " " + MONTHS_GEN[dt.getMonth()].slice(0, 3) + (dt.getFullYear() !== new Date().getFullYear() ? " " + dt.getFullYear() : "");
+      const es = document.createElement("span"); es.className = "wh-es"; es.textContent = w.es[0]; es.lang = "es";
+      const en = document.createElement("span"); en.className = "wh-en"; en.textContent = w.en[0]; en.lang = "en";
+      b.append(dd, es, en);
+      b.setAttribute("aria-label", "Pokaż słówka z " + dt.getDate() + " " + MONTHS_GEN[dt.getMonth()] + ": " + w.es[0] + ", " + w.en[0]);
+      b.addEventListener("click", () => {
+        wordsOffset = dayNo(dt) - dayNo(new Date());
+        renderWords();
+        $("words").scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "start" });
+      });
+      li.append(b); list.append(li);
+    }
+    box.replaceChildren(h, list);
+  };
+  paint();
+  // pełna historia z konta (także słówka z drugiego urządzenia)
+  if (store && store.listDaily && store.uid && navigator.onLine) {
+    try {
+      const all = await store.listDaily();
+      if (seq !== wordsRenderSeq) return;
+      const cache = lsGet(wordsCacheKey(), {});
+      for (const w of all) if (w.es && w.en) { byDate[w.date] = w; cache[w.date] = { es: w.es, en: w.en }; }
+      lsSet(wordsCacheKey(), cache);
+      paint();
+    } catch (e) { dbg("historia słówek: " + (e && (e.code || e.message))); }
+  }
 }
 
 // ---------- zakładki ZADANIA / KALENDARZ / SŁÓWKO NA DZIŚ ----------
