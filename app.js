@@ -1,7 +1,7 @@
-import { CATS, STATUS_CATS, parse, norm, catOf } from "./parser.js";
+import { parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v36";
+const APP_VERSION = "v37";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -50,6 +50,8 @@ function localStore() {
     setMotto(m) { s.motto = m; lsSet("motto", m); s.onChange(); },
     hidden: lsGet("hidden", []),
     setHidden(h) { s.hidden = h; lsSet("hidden", h); s.onChange(); },
+    fields: lsGet("fields", null),
+    setFields(f) { s.fields = f; lsSet("fields", f); s.onChange(); },
   };
   return s;
 }
@@ -87,6 +89,7 @@ async function firebaseStore(config) {
         pending = user ? lsGet(key("pend"), {}) : {};
         s.motto = (user && lsGet(key("motto"), null)) || DEFAULT_MOTTO;
         s.hidden = (user && lsGet(key("hidden"), null)) || [];
+        s.fields = (user && lsGet(key("fields"), null)) || null;
         showLogin(!user);
         refreshMeta(); cb();
         if (!user) return;
@@ -111,6 +114,12 @@ async function firebaseStore(config) {
     setHidden(h) {
       s.hidden = h; lsSet(key("hidden"), h); s.onChange();
       F.setDoc(F.doc(db, "users", s.uid), { hidden: h }, { merge: true }).catch(writeErr);
+    },
+    fields: null,
+    // lista pól (nazwy, kolejność, szerokości) — zapisywana na koncie, wspólna dla wszystkich urządzeń
+    setFields(f) {
+      s.fields = f; lsSet(key("fields"), f); s.onChange();
+      F.setDoc(F.doc(db, "users", s.uid), { fields: f }, { merge: true }).catch(writeErr);
     },
   };
 
@@ -141,6 +150,8 @@ async function firebaseStore(config) {
       if (m !== s.motto) { s.motto = m; lsSet(key("motto"), m); s.onChange(); }
       const h = d.exists() && Array.isArray(d.data().hidden) ? d.data().hidden : null;
       if (h && JSON.stringify(h) !== JSON.stringify(s.hidden)) { s.hidden = h; lsSet(key("hidden"), h); s.onChange(); }
+      const fl = d.exists() && Array.isArray(d.data().fields) && d.data().fields.length ? d.data().fields : null;
+      if (fl && JSON.stringify(fl) !== JSON.stringify(s.fields)) { s.fields = fl; lsSet(key("fields"), fl); s.onChange(); }
     }, () => {}));
   }
 
@@ -302,7 +313,7 @@ let flashId = null, lastUndo = null;
 
 function write(id, data) {
   if (data === null) store.del(id); else store.put(id, data);
-  if (data && data.cat && (store.hidden || []).includes(data.cat)) setTimeout(() => note(`Zapisano w zminimalizowanym polu ${data.cat} — przywrócisz je z granatowej belki na dole.`), 50);
+  if (data && data.cat && (store.hidden || []).includes(data.cat)) setTimeout(() => note(`Zapisano w zminimalizowanym polu ${fieldName(data.cat)} — przywrócisz je z granatowej belki na dole.`), 50);
 }
 
 function isoWeek(d) {
@@ -327,6 +338,20 @@ const checkSvg = '<svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><path 
 const boxes = {};
 
 const hideSvg = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17h12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="square"/></svg>';
+// ---------------- pola tablicy (można je dodawać, usuwać, zmieniać nazwę, szerokość i kolejność) ----------------
+// Pole = {id, name, size}; size: "full" (cała szerokość) | "half" (pół) | "third" (1/3).
+// Zadania wskazują pole przez id, więc zmiana nazwy niczego nie gubi. Domyślne pola mają id = dawne nazwy.
+const DEFAULT_FIELDS = [
+  { id: "INNE", name: "INNE", size: "full" },
+  ...["BIOTTS", "NESTMEDIC", "GENOMTEC", "ORTHOGET", "BIOACCURE", "TRENDCAPITAL"].map((n) => ({ id: n, name: n, size: "half" })),
+  ...["STATUS BETI", "STATUS KAROL", "STATUS BIOTTS"].map((n) => ({ id: n, name: n, size: "third" })),
+];
+const SIZE_SPAN = { full: 6, half: 3, third: 2 };
+const fieldList = () => (store && Array.isArray(store.fields) && store.fields.length ? store.fields : DEFAULT_FIELDS);
+const fieldIds = () => fieldList().map((f) => f.id);
+const fieldName = (id) => (fieldList().find((f) => f.id === id) || {}).name || id;
+const fallbackField = () => (fieldIds().includes("INNE") ? "INNE" : fieldIds()[0]);
+
 // Minimalizacja jak w dawnym Windowsie: pole „zjeżdża” do granatowej belki na dole, przycisk na belce je przywraca.
 const reduceMotion = () => window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
 function minimize(cat) {
@@ -338,48 +363,59 @@ function minimize(cat) {
 function restore(cat) {
   setBoxHidden(cat, false);
   const box = $("box-" + slug(cat));
+  if (!box) return;
   if (!reduceMotion()) { box.classList.add("restoring"); setTimeout(() => box.classList.remove("restoring"), 260); }
   setTimeout(() => box.scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "nearest" }), 30);
 }
 function setBoxHidden(cat, hide) {
   const cur = (store && store.hidden) || [];
   const next = hide ? [...new Set([...cur, cat])] : cur.filter((c) => c !== cat);
-  store.setHidden(CATS.filter((c) => next.includes(c)));
+  store.setHidden(fieldIds().filter((c) => next.includes(c)));
+}
+
+const editSvg = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
+let builtKey = "", foot = null;
+
+function makeBox(f) {
+  const cat = f.id;
+  const box = document.createElement("section");
+  box.className = "box" + (f.size === "third" ? " statusbox" : "");
+  box.id = "box-" + slug(cat);
+  const h = document.createElement("h2");
+  const name = document.createElement("button");
+  name.type = "button"; name.className = "fname"; name.title = "Edytuj pole";
+  name.setAttribute("aria-label", "Edytuj pole " + f.name);
+  const nm = document.createElement("span"); nm.textContent = f.name;
+  name.append(nm); name.insertAdjacentHTML("beforeend", editSvg);
+  name.addEventListener("click", () => openFieldDialog(cat));
+  const n = document.createElement("span"); n.className = "n";
+  const right = document.createElement("span"); right.className = "hright";
+  const hide = document.createElement("button");
+  hide.type = "button"; hide.className = "boxhide"; hide.innerHTML = hideSvg;
+  hide.setAttribute("aria-label", "Minimalizuj pole " + f.name); hide.title = "Minimalizuj";
+  hide.addEventListener("click", () => minimize(cat));
+  right.append(n, hide, boxMic(cat));
+  h.append(name, right);
+  const ul = document.createElement("ul");
+  const add = document.createElement("input");
+  add.className = "add"; add.type = "text"; add.id = "add-" + slug(cat);
+  add.placeholder = "+ dodaj zadanie"; add.setAttribute("enterkeyhint", "done");
+  add.setAttribute("aria-label", "Dodaj zadanie do " + f.name);
+  add.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.isComposing) {
+      const text = add.value.trim(); if (!text) return;
+      const id = newId(); flashId = id;
+      write(id, { type: "todo", cat, text, done: false, created: Date.now(), updated: Date.now() });
+      add.value = "";
+    }
+  });
+  box.append(h, ul, add);
+  boxes[cat] = { ul, n, open: 0 };
+  return box;
 }
 
 function buildSheet() {
-  for (const cat of CATS) {
-    const box = document.createElement("section");
-    box.className = "box" + (cat === "INNE" ? " inne" : "") + (STATUS_CATS.includes(cat) ? " statusbox" : "");
-    box.id = "box-" + slug(cat);
-    const h = document.createElement("h2");
-    const name = document.createElement("span"); name.textContent = cat;
-    const n = document.createElement("span"); n.className = "n";
-    const right = document.createElement("span"); right.className = "hright";
-    const hide = document.createElement("button");
-    hide.type = "button"; hide.className = "boxhide"; hide.innerHTML = hideSvg;
-    hide.setAttribute("aria-label", "Minimalizuj pole " + cat); hide.title = "Minimalizuj";
-    hide.addEventListener("click", () => minimize(cat));
-    right.append(n, hide, boxMic(cat));
-    h.append(name, right);
-    const ul = document.createElement("ul");
-    const add = document.createElement("input");
-    add.className = "add"; add.type = "text"; add.id = "add-" + slug(cat);
-    add.placeholder = "+ dodaj zadanie"; add.setAttribute("enterkeyhint", "done");
-    add.setAttribute("aria-label", "Dodaj zadanie do " + cat);
-    add.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.isComposing) {
-        const text = add.value.trim(); if (!text) return;
-        const id = newId(); flashId = id;
-        write(id, { type: "todo", cat, text, done: false, created: Date.now(), updated: Date.now() });
-        add.value = "";
-      }
-    });
-    box.append(h, ul, add);
-    sheet.append(box);
-    boxes[cat] = { ul, n };
-  }
-  const foot = document.createElement("div"); foot.className = "foot";
+  foot = document.createElement("div"); foot.className = "foot";
   const wk = document.createElement("div"); wk.className = "week"; wk.id = "week";
   const m = document.createElement("div"); m.className = "motto"; m.id = "motto";
   m.contentEditable = "true"; m.spellcheck = false; m.setAttribute("role", "textbox"); m.setAttribute("aria-label", "Motto");
@@ -390,17 +426,27 @@ function buildSheet() {
   });
   foot.append(wk, m);
   sheet.append(foot);
+  ensureSheet();
+}
+// Przebudowa pól tylko wtedy, gdy zmieniła się ich lista (nazwy, kolejność, szerokości).
+function ensureSheet() {
+  const key = JSON.stringify(fieldList());
+  if (key === builtKey) return;
+  builtKey = key;
+  sheet.querySelectorAll(".box").forEach((b) => b.remove());
+  for (const k of Object.keys(boxes)) delete boxes[k];
+  for (const f of fieldList()) sheet.insertBefore(makeBox(f), foot);
 }
 
 const micSvg = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Z" fill="currentColor"/><path d="M18 11.5a6 6 0 0 1-12 0M12 17.5V21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
-// Mikrofon w rogu pola spółki. Bez rozpoznawania mowy na iOS: etykieta pola „+ dodaj zadanie” (otwiera klawiaturę z dyktowaniem).
+// Mikrofon w rogu pola. Bez rozpoznawania mowy na iOS: etykieta pola „+ dodaj zadanie” (otwiera klawiaturę z dyktowaniem).
 function boxMic(cat) {
   const noSR = !(window.SpeechRecognition || window.webkitSpeechRecognition);
   const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const el = document.createElement(noSR && isIOS ? "label" : "button");
   if (el.tagName === "LABEL") el.htmlFor = "add-" + slug(cat); else el.type = "button";
   el.className = "boxmic"; el.dataset.cat = cat; el.innerHTML = micSvg;
-  el.setAttribute("aria-label", "Dyktuj zadanie do " + cat);
+  el.setAttribute("aria-label", "Dyktuj zadanie do " + fieldName(cat));
   return el;
 }
 
@@ -431,43 +477,43 @@ function itemEl(t) {
   return li;
 }
 
-// Schowane pola: znikają z siatki, a na górze tablicy zostaje etykieta (nazwa + liczba otwartych), która je odkrywa.
+// Układ (siatka 6 kolumn): pola idą po kolei rzędami według szerokości; niepełny rząd jest rozciągany,
+// żeby nie było dziur. Zminimalizowane pola znikają z siatki i trafiają na granatową belkę.
 function renderHidden() {
   const hidden = store.hidden || [];
-  // Układ siatki (6 kolumn): INNE na całą szerokość, spółki po 2 w rzędzie, pola STATUS po 3 w rzędzie.
-  // Gdy część pól jest schowana, pozostałe dzielą rząd tak, żeby nie było dziur.
-  const visible = CATS.filter((c) => !hidden.includes(c));
-  const companies = visible.filter((c) => c !== "INNE" && !STATUS_CATS.includes(c));
-  const statuses = visible.filter((c) => STATUS_CATS.includes(c));
-  const span = {};
-  visible.forEach((c) => { span[c] = c === "INNE" ? 6 : STATUS_CATS.includes(c) ? 2 : 3; });
-  if (companies.length % 2 === 1) span[companies[companies.length - 1]] = 6;
-  if (statuses.length === 1) span[statuses[0]] = 6;
-  if (statuses.length === 2) statuses.forEach((c) => { span[c] = 3; });
-  let pos = 0;
-  for (const cat of CATS) {
-    const box = $("box-" + slug(cat));
-    box.hidden = hidden.includes(cat);
-    box.classList.remove("col2", "wide", "span2", "span3");
-    if (box.hidden) continue;
-    const w = span[cat];
-    if (pos + w > 6) pos = 0;
-    box.classList.add(w === 6 ? "wide" : w === 2 ? "span2" : "span3");
-    pos += w;
-    if (pos === 6) { box.classList.add("col2"); pos = 0; }      // ostatnie w rzędzie: bez prawej linii
+  const visible = fieldList().filter((f) => !hidden.includes(f.id));
+  const rows = []; let row = [], used = 0;
+  for (const f of visible) {
+    const w = SIZE_SPAN[f.size] || 3;
+    if (used + w > 6) { rows.push(row); row = []; used = 0; }
+    row.push({ f, w }); used += w;
+  }
+  if (row.length) rows.push(row);
+  for (const r of rows) {
+    const total = r.reduce((a, x) => a + x.w, 0);
+    if (total < 6) { if (6 % r.length === 0) r.forEach((x) => { x.w = 6 / r.length; }); else r[r.length - 1].w += 6 - total; }
+  }
+  const spanOf = {}, lastInRow = new Set();
+  rows.forEach((r) => { r.forEach((x) => { spanOf[x.f.id] = x.w; }); lastInRow.add(r[r.length - 1].f.id); });
+  for (const f of fieldList()) {
+    const box = $("box-" + slug(f.id));
+    box.hidden = hidden.includes(f.id);
+    box.style.gridColumn = box.hidden ? "" : "span " + spanOf[f.id];
+    box.classList.toggle("col2", lastInRow.has(f.id));
   }
 
   const bar = $("taskbar");
-  bar.hidden = !hidden.length;
-  document.body.classList.toggle("has-taskbar", hidden.length > 0);
-  const tasks = hidden.map((cat) => {
+  const hiddenIds = fieldIds().filter((id) => hidden.includes(id));
+  bar.hidden = !hiddenIds.length;
+  document.body.classList.toggle("has-taskbar", hiddenIds.length > 0);
+  const tasks = hiddenIds.map((cat) => {
     const b = document.createElement("button");
     b.type = "button"; b.className = "task";
     const open = boxes[cat] ? boxes[cat].open : 0;
-    b.setAttribute("aria-label", "Przywróć pole " + cat + (open ? ", otwarte zadania: " + open : ""));
+    b.setAttribute("aria-label", "Przywróć pole " + fieldName(cat) + (open ? ", otwarte zadania: " + open : ""));
     b.title = "Przywróć";
     const ico = document.createElement("span"); ico.className = "task-ico"; ico.setAttribute("aria-hidden", "true");
-    const nm = document.createElement("span"); nm.className = "task-name"; nm.textContent = cat;
+    const nm = document.createElement("span"); nm.className = "task-name"; nm.textContent = fieldName(cat);
     b.append(ico, nm);
     if (open) { const c = document.createElement("span"); c.className = "task-n"; c.textContent = open; b.append(c); }
     b.addEventListener("click", () => restore(cat));
@@ -476,13 +522,86 @@ function renderHidden() {
   bar.replaceChildren(...tasks);
 }
 
+// ---------------- okno edycji pola ----------------
+let editing = null;   // id edytowanego pola albo null przy dodawaniu
+// 1 zadanie, 2–4 zadania, 5+ zadań (12–14 zadań)
+const zadan = (n) => n + " " + (n === 1 ? "zadanie" : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14)) ? "zadania" : "zadań");
+function openFieldDialog(id) {
+  editing = id;
+  const f = id ? fieldList().find((x) => x.id === id) : { name: "", size: "half" };
+  $("fieldTitle").textContent = id ? "Edytuj pole" : "Nowe pole";
+  $("fieldName").value = f.name;
+  document.querySelectorAll('input[name="fsize"]').forEach((r) => { r.checked = r.value === f.size; });
+  $("fieldMove").hidden = !id;
+  $("fieldDelete").hidden = !id;
+  resetDelete();
+  $("fieldErr").textContent = "";
+  $("fieldDlg").hidden = false;
+  setTimeout(() => $("fieldName").focus(), 30);
+}
+function closeFieldDialog() { $("fieldDlg").hidden = true; editing = null; }
+let deleteArmed = false;
+function resetDelete() { deleteArmed = false; $("fieldDelete").textContent = "Usuń pole"; $("fieldDelete").classList.remove("armed"); }
+
+$("fieldCancel").addEventListener("click", closeFieldDialog);
+$("fieldDlg").addEventListener("click", (e) => { if (e.target === $("fieldDlg")) closeFieldDialog(); });
+$("fieldForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const name = $("fieldName").value.trim().replace(/\s+/g, " ");
+  if (!name) { $("fieldErr").textContent = "Wpisz nazwę pola."; return; }
+  const size = (document.querySelector('input[name="fsize"]:checked') || {}).value || "half";
+  const list = fieldList().map((f) => ({ ...f }));
+  if (editing) {
+    const f = list.find((x) => x.id === editing); if (f) { f.name = name; f.size = size; }
+    store.setFields(list);
+    note(`Zapisano pole ${name}.`);
+  } else {
+    list.push({ id: "f" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name, size });
+    store.setFields(list);
+    note(`Dodano pole ${name} — jest na końcu tablicy.`);
+    setTimeout(() => { const last = sheet.querySelectorAll(".box"); const b = last[last.length - 1]; if (b) b.scrollIntoView({ behavior: "smooth", block: "center" }); }, 60);
+  }
+  closeFieldDialog();
+});
+function moveField(dir) {
+  const list = fieldList().map((f) => ({ ...f }));
+  const i = list.findIndex((f) => f.id === editing), j = i + dir;
+  if (i < 0 || j < 0 || j >= list.length) return;
+  [list[i], list[j]] = [list[j], list[i]];
+  store.setFields(list);
+  $("fieldErr").textContent = `Pozycja ${j + 1} z ${list.length}.`;
+}
+$("fieldUp").addEventListener("click", () => moveField(-1));
+$("fieldDown").addEventListener("click", () => moveField(1));
+$("fieldDelete").addEventListener("click", () => {
+  const list = fieldList();
+  if (list.length <= 1) { $("fieldErr").textContent = "Nie można usunąć ostatniego pola."; return; }
+  const inField = todos().filter((t) => t.cat === editing);
+  if (!deleteArmed) {
+    deleteArmed = true;
+    $("fieldDelete").classList.add("armed");
+    $("fieldDelete").textContent = inField.length ? `Tak, usuń pole i ${zadan(inField.length)}` : "Tak, usuń pole";
+    $("fieldErr").textContent = inField.length ? `Uwaga: w tym polu ${inField.length === 1 ? "jest" : "są"} ${zadan(inField.length)} — zostaną usunięte.` : "Kliknij jeszcze raz, żeby potwierdzić.";
+    return;
+  }
+  const name = fieldName(editing), id = editing;
+  for (const t of inField) write(t.id, null);
+  store.setFields(list.filter((f) => f.id !== id));
+  if ((store.hidden || []).includes(id)) store.setHidden(store.hidden.filter((h) => h !== id));
+  closeFieldDialog();
+  note(`Usunięto pole ${name}` + (inField.length ? ` i ${zadan(inField.length)}.` : "."));
+});
+$("addField").addEventListener("click", () => openFieldDialog(null));
+
 function render() {
   if (!store) return;
   const a = document.activeElement;
   if (a && a.classList && (a.classList.contains("txt") || a.id === "motto")) return; // nie przeszkadzaj w edycji
+  ensureSheet();
   const all = todos();
-  for (const cat of CATS) {
-    const list = all.filter((t) => (CATS.includes(t.cat) ? t.cat : "INNE") === cat)
+  const ids = fieldIds(), fb = fallbackField();
+  for (const cat of ids) {
+    const list = all.filter((t) => (ids.includes(t.cat) ? t.cat : fb) === cat)
       .sort((x, y) => (x.done - y.done) || (x.created - y.created));
     boxes[cat].ul.replaceChildren(...list.map(itemEl));
     const open = list.filter((t) => !t.done).length;
@@ -630,7 +749,7 @@ if (IOS && !SR) {
     const id = newId(); flashId = id;
     write(id, { type: "todo", cat: targetCat, text: textCap, done: false, created: Date.now(), updated: Date.now() });
     lastUndo = [[id, null]];
-    note(`Dodano do ${targetCat}: ${textCap}`, false, true);
+    note(`Dodano do ${fieldName(targetCat)}: ${textCap}`, false, true);
   }
   function commit(text) {
     if (targetCat) addToTarget(text);
@@ -640,7 +759,7 @@ if (IOS && !SR) {
   function stopListening(msg) {
     listening = false; clearTimeout(watchdog); clearTimeout(idle); clearTimeout(restartTimer); clearTimeout(endTimer);
     if (rec) { try { rec.stop(); } catch {} }
-    if (activeBtn) { activeBtn.classList.remove("on"); activeBtn.setAttribute("aria-label", activeBtn === mic ? "Włącz mikrofon" : "Dyktuj zadanie do " + targetCat); }
+    if (activeBtn) { activeBtn.classList.remove("on"); activeBtn.setAttribute("aria-label", activeBtn === mic ? "Włącz mikrofon" : "Dyktuj zadanie do " + fieldName(targetCat)); }
     clearTargets();
     let left = buffer.trim();
     const cutL = trailingEndWord(left); if (cutL >= 0) left = left.slice(0, cutL).trim();
@@ -772,18 +891,18 @@ if (IOS && !SR) {
       if (targetCat) field().value = "";
       buffer = ""; consumed = lastFull.length;
       activeBtn.classList.remove("on");
-      activeBtn.setAttribute("aria-label", activeBtn === mic ? "Włącz mikrofon" : "Dyktuj zadanie do " + targetCat);
+      activeBtn.setAttribute("aria-label", activeBtn === mic ? "Włącz mikrofon" : "Dyktuj zadanie do " + fieldName(targetCat));
       targetCat = cat; activeBtn = btn;
       btn.classList.add("on"); btn.setAttribute("aria-label", "Wyłącz mikrofon");
       setTarget(""); bumpIdle();
-      note(cat ? `Teraz mów zadanie do ${cat}, na końcu „zapisz”.` : "Teraz mów polecenie, np. „dodaj Genomtec … zapisz”.");
+      note(cat ? `Teraz mów zadanie do ${fieldName(cat)}, na końcu „zapisz”.` : "Teraz mów polecenie, np. „dodaj Genomtec … zapisz”.");
       return;
     }
     listening = true; buffer = ""; heard = false; targetCat = cat; activeBtn = btn;
     btn.classList.add("on"); btn.setAttribute("aria-label", "Wyłącz mikrofon");
     setTarget("");
     note(cat
-      ? `Słucham… Mów zadanie do ${cat}, na końcu powiedz „zapisz”.`
+      ? `Słucham… Mów zadanie do ${fieldName(cat)}, na końcu powiedz „zapisz”.`
       : "Słucham… Powiedz np. „dodaj Genomtec wysłać umowę zapisz”.");
     bumpIdle();
     try { startRec(); } catch { stopListening(); keyboardDictation(); }
@@ -865,7 +984,7 @@ async function cloudToggle(btn, cat) {
   if (r && r.btn === btn) { r.spoke = true; cloudStop("send"); return; }   // ten sam mikrofon = koniec nagrania (wysyłamy zawsze)
   if (r) {                                                         // inny mikrofon w trakcie = zmiana pola
     cloudBtnOff(r.btn); r.btn = btn; r.cat = cat; btn.classList.add("on"); cloudSetTarget(cat);
-    note(cat ? `Nagrywam do ${cat}…` : "Nagrywam polecenie…"); return;
+    note(cat ? `Nagrywam do ${fieldName(cat)}…` : "Nagrywam polecenie…"); return;
   }
   if (!navigator.onLine) { note("Brak internetu — rozpoznawanie mowy wymaga połączenia. Wpisz zadanie ręcznie.", true); return; }
 
@@ -875,7 +994,7 @@ async function cloudToggle(btn, cat) {
   if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {});
   const rec = cloud.rec = { btn, cat, ctx, stopped: false, spoke: false };
   btn.classList.add("on"); cloudSetTarget(cat);
-  note(cat ? `Mów zadanie do ${cat}. Zapisze się, gdy skończysz mówić.` : "Mów polecenie, np. „dodaj Genomtec wysłać umowę”.");
+  note(cat ? `Mów zadanie do ${fieldName(cat)}. Zapisze się, gdy skończysz mówić.` : "Mów polecenie, np. „dodaj Genomtec wysłać umowę”.");
 
   try {
     rec.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
@@ -965,7 +1084,7 @@ async function transcribe(blob, cat, btn) {
       const id = newId(); flashId = id;
       write(id, { type: "todo", cat, text: t, done: false, created: Date.now(), updated: Date.now() });
       lastUndo = [[id, null]];
-      note(`Dodano do ${cat}: ${t}`, false, true);
+      note(`Dodano do ${fieldName(cat)}: ${t}`, false, true);
     } else {
       $("cmd").value = text; run(text);
     }
