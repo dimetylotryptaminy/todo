@@ -1,7 +1,7 @@
 import { parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v50";
+const APP_VERSION = "v51";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -1340,7 +1340,7 @@ function renderCalendarInner() {
         txt.classList.add("hol"); if (hol[key].every((h) => h.c === "ES")) txt.classList.add("es");
       }
       cell.append(num, wd, txt);
-      if (dow === 1) { const wk = document.createElement("span"); wk.className = "wweek"; wk.textContent = isoWeek(date).week; cell.append(wk); }
+      // numery tygodni celowo nie są pokazywane
       const label = d + " " + MONTHS_GEN[m] + (hol[key] ? ", " + holText(key) : "") + (on.length ? ": " + on.map((e) => e.title).join(", ") : "");
       cell.setAttribute("aria-label", label); cell.title = label;
       cell.addEventListener("click", () => { if (on.length === 1) openEventDialog(on[0].id); else openEventDialog(null, key); });
