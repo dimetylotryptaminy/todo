@@ -1,7 +1,7 @@
 import { parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v48";
+const APP_VERSION = "v49";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -1179,7 +1179,9 @@ if (new URL(location.href).searchParams.has("v")) {
 // ======================= KALENDARZ ROCZNY =======================
 // Wydarzenia (wyjazdy, przyjazdy, delegacje, wakacje…) są zapisywane tak jak zadania (ten sam zbiór na koncie,
 // ta sama kolejka offline), tylko z typem "event": {type, title, kind, start: "RRRR-MM-DD", end: "RRRR-MM-DD"}.
-const KINDS = { trip: "Wyjazd", guest: "Przyjazd gości", work: "Delegacja", holiday: "Wakacje", other: "Inne" };
+// Kategorie wydarzeń. Starsze wydarzenia z usuniętych kategorii (wyjazd, delegacja) pokazują się jako „Inne”.
+const KINDS = { guest: "Goście w Soto", holiday: "Wakacje", other: "Inne" };
+const kindOf = (ev) => (KINDS[ev.kind] ? ev.kind : "other");
 const MONTHS = ["Styczeń", "Luty", "Marzec", "Kwiecień", "Maj", "Czerwiec", "Lipiec", "Sierpień", "Wrzesień", "Październik", "Listopad", "Grudzień"];
 const MONTHS_GEN = ["stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca", "lipca", "sierpnia", "września", "października", "listopada", "grudnia"];
 const WD = ["Pn", "Wt", "Śr", "Cz", "Pt", "So", "Nd"];
@@ -1403,10 +1405,10 @@ function renderCalendarInner() {
 let evEditing = null, evDeleteArmed = false;
 function openEventDialog(id, dateISO) {
   evEditing = id;
-  const ev = id ? events().find((e) => e.id === id) : { title: "", kind: "trip", start: dateISO, end: dateISO };
+  const ev = id ? events().find((e) => e.id === id) : { title: "", kind: "guest", start: dateISO, end: dateISO };
   $("evTitle").textContent = id ? "Edytuj wydarzenie" : "Nowe wydarzenie";
   $("evName").value = ev.title || "";
-  document.querySelectorAll('input[name="evKind"]').forEach((r) => { r.checked = r.value === (ev.kind || "trip"); });
+  document.querySelectorAll('input[name="evKind"]').forEach((r) => { r.checked = r.value === kindOf(ev); });
   $("evStart").value = ev.start; $("evEnd").value = ev.end;
   $("evDelete").hidden = !id;
   evDeleteArmed = false; $("evDelete").textContent = "Usuń wydarzenie"; $("evDelete").classList.remove("armed");
