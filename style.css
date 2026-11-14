@@ -727,3 +727,17 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none 
   background: var(--ink);
   -webkit-mask: url("motto.png") right center / contain no-repeat; mask: url("motto.png") right center / contain no-repeat;
 }
+
+/* górny pasek: zakładki po lewej; po prawej mała data nad dużym odręcznym mottem (jak na wzorze) */
+.topline { flex-wrap: nowrap; align-items: flex-end; }
+.topline .tabs { flex: none; margin-bottom: 6px; }
+.topinfo { flex: 0 1 470px; min-width: 240px; align-items: flex-end; gap: 2px; }
+.ti-date { order: -1; font-size: 14px; padding-right: 4px; }
+.ti-motto.hand { width: 100%; max-width: 470px; margin-bottom: -6px; }
+@media (max-width: 760px) {
+  .topline { flex-wrap: wrap; }
+  .topline .tabs { flex: 1; margin-bottom: 0; }
+  .topinfo { flex: 1 1 100%; align-items: center; }
+  .ti-date { padding-right: 0; }
+  .ti-motto.hand { width: min(360px, 90vw); margin-bottom: 0; }
+}
