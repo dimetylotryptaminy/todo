@@ -1,7 +1,7 @@
 import { parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v46";
+const APP_VERSION = "v47";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -1208,12 +1208,15 @@ function holidays(y) {
   return out;
 }
 
-let calYear = new Date().getFullYear();
-let calMonth = new Date().getMonth();
+// Kalendarz zaczyna się od 2027 roku (wcześniejszych lat nie pokazujemy).
+const CAL_MIN_YEAR = 2027;
+let calYear = Math.max(new Date().getFullYear(), CAL_MIN_YEAR);
+let calMonth = new Date().getFullYear() < CAL_MIN_YEAR ? 0 : new Date().getMonth();
 const phoneMQ = window.matchMedia("(max-width: 640px)");
 const phoneCal = () => phoneMQ.matches;
 phoneMQ.addEventListener ? phoneMQ.addEventListener("change", () => { if (view === "calendar") renderCalendar(); }) : null;
 function shiftMonth(d) {
+  if (d < 0 && calYear <= CAL_MIN_YEAR && calMonth === 0) return;
   calMonth += d;
   if (calMonth < 0) { calMonth = 11; calYear--; } else if (calMonth > 11) { calMonth = 0; calYear++; }
   renderCalendar();
@@ -1258,7 +1261,8 @@ function renderCalendarInner() {
   // nagłówek: rok + dodawanie
   const head = document.createElement("div"); head.className = "cal-head";
   const prev = document.createElement("button"); prev.type = "button"; prev.className = "yearbtn"; prev.textContent = "‹"; prev.setAttribute("aria-label", "Poprzedni rok");
-  prev.addEventListener("click", () => { calYear--; renderCalendar(); });
+  prev.disabled = calYear <= CAL_MIN_YEAR;
+  prev.addEventListener("click", () => { if (calYear > CAL_MIN_YEAR) { calYear--; renderCalendar(); } });
   const yr = document.createElement("h2"); yr.className = "cal-year"; yr.textContent = calYear;
   const next = document.createElement("button"); next.type = "button"; next.className = "yearbtn"; next.textContent = "›"; next.setAttribute("aria-label", "Następny rok");
   next.addEventListener("click", () => { calYear++; renderCalendar(); });
@@ -1329,6 +1333,7 @@ function renderCalendarInner() {
     const nx = document.createElement("button"); nx.type = "button"; nx.className = "yearbtn"; nx.textContent = "›"; nx.setAttribute("aria-label", "Następny miesiąc");
     const title = document.createElement("h2"); title.className = "mtitle"; title.textContent = MONTHS[calMonth] + " " + calYear;
     title.style.setProperty("--h", String(Math.round(285 + calMonth * (215 / 11)) % 360));
+    pv.disabled = calYear <= CAL_MIN_YEAR && calMonth === 0;
     pv.addEventListener("click", () => shiftMonth(-1)); nx.addEventListener("click", () => shiftMonth(1));
     nav.append(pv, title, nx);
     const chips = document.createElement("div"); chips.className = "mchips";
@@ -1403,7 +1408,7 @@ $("evForm").addEventListener("submit", (e) => {
   write(id, { type: "event", title, kind, start, end, created: prevEv ? prevEv.created : Date.now(), updated: Date.now() });
   lastUndo = [[id, prevEv ? strip(prevEv) : null]];
   note((prevEv ? "Zapisano: " : "Dodano: ") + title + " (" + fmtRange({ start, end }) + ")", false, true);
-  if (start.slice(0, 4) !== String(calYear)) calYear = Number(start.slice(0, 4));
+  if (start.slice(0, 4) !== String(calYear)) calYear = Math.max(CAL_MIN_YEAR, Number(start.slice(0, 4)));
   closeEventDialog();
 });
 $("evDelete").addEventListener("click", () => {

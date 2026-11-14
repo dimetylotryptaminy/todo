@@ -497,3 +497,5 @@ body.view-calendar .wrap { max-width: 1480px; }
 .cal-add { background: #1f63c6; border-color: #1f63c6; color: #fff; font-weight: 600; }
 .cal-add:hover { background: #1953a8; border-color: #1953a8; }
 .cal-add:active { background: #164a95; }
+.yearbtn:disabled { opacity: .3; cursor: default; }
+.yearbtn:disabled:hover { border-color: var(--hair); color: var(--ink); }
