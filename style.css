@@ -766,3 +766,4 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none 
 .ti-motto.hand { width: 330px; -webkit-mask-position: center; mask-position: center; }
 @media (max-width: 760px) { .ti-motto.hand { width: min(260px, 72vw); } }
 @media (min-width: 761px) { .topline { column-gap: 0; } }
+@media (min-width: 761px) { .ti-motto.hand { position: relative; top: 3px; } }

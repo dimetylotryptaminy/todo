@@ -1,7 +1,7 @@
 // Service worker: aplikacja otwiera się bez internetu.
 // Pliki aplikacji: najpierw sieć (świeża wersja), przy braku sieci kopia z pamięci.
 // Biblioteki i czcionki z CDN: kopia z pamięci, odświeżana w tle.
-const VERSION = "tablica-v73";
+const VERSION = "tablica-v74";
 const SHELL = [
   "./", "index.html", "style.css", "app.js", "parser.js", "words.js", "config.js", "manifest.webmanifest", "motto.png",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png",
