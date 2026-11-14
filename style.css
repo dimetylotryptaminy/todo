@@ -639,3 +639,8 @@ li.done .chk { background: var(--accent); border-color: var(--accent); }
   .sheet { gap: 12px; }
   .box { min-height: 0; }
 }
+/* okna logowania i dialogów w stylu kart (zaokrąglone, z cieniem) */
+.login-card { border: 0; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,.14); }
+.login-card h1 { letter-spacing: .02em; }
+.login-card input { border-radius: 10px; }
+.login-card .btn { border-radius: 10px; }

@@ -1,6 +1,6 @@
 {
-  "name": "Tablica spółek",
-  "short_name": "Tablica",
+  "name": "MOJE ZADANIA",
+  "short_name": "Moje zadania",
   "description": "Tygodniowa lista zadań dla spółek.",
   "lang": "pl",
   "start_url": "./",
