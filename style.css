@@ -756,3 +756,8 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none 
 .topline { align-items: center; }
 .topline .tabs { align-self: center; }
 .ti-motto.hand { margin-bottom: 0; }
+
+/* data i tydzień na dole strony; u góry samo motto, na wysokości zakładek */
+.page-date { margin: 4px 0 0; text-align: center; font-size: 14px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.page-date::first-letter { text-transform: uppercase; }
+.topinfo { gap: 0; }
