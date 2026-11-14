@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v54";
+const APP_VERSION = "v55";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -1564,14 +1564,16 @@ const staticWords = (n) => ({
   source: "offline",
 });
 const wordsInflight = {};
-async function wordsFor(d, isToday) {
+async function wordsFor(d, isToday, force = false) {
   const key = iso(d);
   const cache = lsGet(wordsCacheKey(), {});
-  if (cache[key]) return { ...cache[key], source: "ai" };
+  if (cache[key] && !force) return { ...cache[key], source: "ai" };
   const save = (w) => { const c = lsGet(wordsCacheKey(), {}); c[key] = { es: w.es, en: w.en }; const ks = Object.keys(c).sort(); while (ks.length > 120) delete c[ks.shift()]; lsSet(wordsCacheKey(), c); };
   const cloud = store && store.getDaily && store.uid;
   if (cloud && navigator.onLine) {
-    try { const got = await store.getDaily(key); if (got && got.es && got.en) { save(got); return { ...got, source: "ai" }; } } catch (e) { dbg("słówko getDaily: " + (e && (e.code || e.message))); }
+    if (!force) {
+      try { const got = await store.getDaily(key); if (got && got.es && got.en) { save(got); return { ...got, source: "ai" }; } } catch (e) { dbg("słówko getDaily: " + (e && (e.code || e.message))); }
+    }
     if (isToday && STT_URL) {
       if (!wordsInflight[key]) wordsInflight[key] = (async () => {
         const token = await store.auth.currentUser.getIdToken();
@@ -1587,8 +1589,8 @@ async function wordsFor(d, isToday) {
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.es || !data.en) throw new Error(data.error ? data.error + (data.status ? " " + data.status : "") : "HTTP " + res.status);
         // drugie urządzenie mogło w międzyczasie zapisać słówko — wtedy bierzemy tamto, żeby wszędzie było to samo
-        const again = await store.getDaily(key).catch(() => null);
-        if (again && again.es && again.en) return again;
+        // (chyba że świadomie losujemy inne słówko)
+        if (!force) { const again = await store.getDaily(key).catch(() => null); if (again && again.es && again.en) return again; }
         const w = { es: data.es, en: data.en, created: Date.now() };
         await store.setDaily(key, w);
         return w;
@@ -1601,7 +1603,7 @@ async function wordsFor(d, isToday) {
 }
 
 let wordsRenderSeq = 0;
-async function renderWords() {
+async function renderWords(force = false) {
   const root = $("words");
   const seq = ++wordsRenderSeq;
   const d = new Date(); d.setDate(d.getDate() + wordsOffset);
@@ -1621,7 +1623,8 @@ async function renderWords() {
   const loading = document.createElement("p"); loading.className = "muted words-loading"; loading.textContent = "Przygotowuję słówko na dziś…";
   root.replaceChildren(head, loading);
 
-  const w = await wordsFor(d, wordsOffset === 0);
+  if (force) loading.textContent = "Losuję inne słówko…";
+  const w = await wordsFor(d, wordsOffset === 0, force);
   if (seq !== wordsRenderSeq) return;            // w międzyczasie przełączono dzień
   const cards = document.createElement("div"); cards.className = "wcards";
   cards.append(wordCard("es", "hiszpański", "es-ES", w.es), wordCard("en", "angielski", "en-GB", w.en));
@@ -1632,6 +1635,12 @@ async function renderWords() {
     info.textContent = w.error ? "Nie udało się pobrać nowego słówka (" + w.error + ") — pokazuję słówko z wbudowanej listy."
       : (!navigator.onLine ? "Bez internetu — pokazuję słówko z wbudowanej listy." : "Słówko z wbudowanej listy.");
     nodes.push(info);
+  }
+  if (wordsOffset === 0 && ttsReady() && navigator.onLine) {
+    // „Inne słówko”: nowe słówko od AI zamiast dzisiejszego (zapisuje się na koncie, więc zmieni się na wszystkich urządzeniach)
+    const again = document.createElement("button"); again.type = "button"; again.className = "ghost words-today"; again.textContent = "↻ Inne słówko";
+    again.addEventListener("click", () => renderWords(true));
+    nodes.push(again);
   }
   if (wordsOffset !== 0) {
     const back = document.createElement("button"); back.type = "button"; back.className = "ghost words-today"; back.textContent = "Wróć do dzisiejszego słówka";
