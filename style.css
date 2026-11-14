@@ -218,3 +218,4 @@ li.done .txt { color: var(--done); text-decoration: line-through; }
   min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--accent); color: var(--paper);
   font-size: 11px; letter-spacing: 0; display: inline-grid; place-items: center; font-variant-numeric: tabular-nums;
 }
+.boot-err { margin: 0; padding: 8px 10px; background: var(--desk); border-radius: 6px; font: 12px/1.4 ui-monospace, Menlo, monospace; white-space: pre-wrap; color: var(--warn); max-height: 30vh; overflow: auto; }

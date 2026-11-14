@@ -1,7 +1,7 @@
 import { CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v32";
+const APP_VERSION = "v33";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -998,24 +998,31 @@ function restoreAfterReload() {
 $("ver").textContent = "Wersja " + APP_VERSION;
 $("refreshApp").addEventListener("click", async () => {
   const b = $("refreshApp");
-  // Bez internetu nie czyścimy kopii aplikacji — inaczej nie dałoby się jej otworzyć aż do powrotu sieci.
+  // Bez internetu nie ruszamy kopii aplikacji — działa zapisana wersja.
   let online = navigator.onLine;
   // jakakolwiek odpowiedź serwera (nawet 404) = jest sieć; bez sieci service worker zwraca błąd i fetch rzuca wyjątek
   if (online) { try { await fetch("__ping__?" + Date.now(), { cache: "no-store" }); } catch { online = false; } }
   if (!online) { note("Brak internetu — odśwież aplikację, gdy wróci połączenie. Do tego czasu działa zapisana wersja.", true); return; }
   b.classList.add("busy"); b.disabled = true;
   try {
-    if ("serviceWorker" in navigator) {
-      const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map((r) => r.update().catch(() => {})));
+    const reg = "serviceWorker" in navigator ? await navigator.serviceWorker.getRegistration() : null;
+    if (reg) {
+      await reg.update().catch(() => {});
+      const sw = navigator.serviceWorker.controller || reg.active;
+      if (sw) {
+        // pobierz komplet nowych plików; stara kopia jest podmieniana dopiero, gdy wszystkie się pobrały
+        const res = await new Promise((resolve) => {
+          const ch = new MessageChannel();
+          ch.port1.onmessage = (ev) => resolve(ev.data);
+          sw.postMessage({ type: "refresh" }, [ch.port2]);
+          setTimeout(() => resolve({ ok: false, error: "timeout" }), 20000);
+        });
+        if (!res.ok) { dbg("refresh: " + res.error); note("Nie udało się pobrać nowej wersji (" + res.error + "). Spróbuj za chwilę.", true); b.classList.remove("busy"); b.disabled = false; return; }
+      }
     }
-    if (window.caches) {
-      const keys = await caches.keys();
-      await Promise.all(keys.map((k) => caches.delete(k)));
-    }
-  } catch {}
+  } catch (err) { dbg("refresh wyjątek " + (err && err.message)); }
   const url = new URL(location.href);
-  url.searchParams.set("v", Date.now().toString(36));   // omija pamięć podręczną przeglądarki
+  url.searchParams.set("v", Date.now().toString(36));
   location.replace(url.toString());
 });
 // po odświeżeniu usuwamy znacznik z adresu (zostaje np. ?debug)
@@ -1026,6 +1033,7 @@ if (new URL(location.href).searchParams.has("v")) {
 
 // ---------------- boot ----------------
 buildSheet();
+window.__booted = true;   // strażnik w index.html: aplikacja wystartowała
 (async () => {
   const cfg = window.FIREBASE_CONFIG;
   if (cfg && cfg.apiKey) {

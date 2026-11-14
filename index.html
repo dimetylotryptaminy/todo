@@ -15,6 +15,31 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&display=swap">
 <link rel="stylesheet" href="style.css">
+<script>
+  // Strażnik startu: jeśli aplikacja nie wystartuje w kilka sekund (np. niepełna kopia plików w telefonie),
+  // pokazujemy przyczynę i przycisk naprawy zamiast pustej strony.
+  window.__bootErrors = [];
+  addEventListener("error", function (e) {
+    var t = e.target;
+    if (t && t.tagName === "SCRIPT") __bootErrors.push("Nie wczytano pliku: " + (t.src || "").split("/").pop());
+    else if (e.message) __bootErrors.push(e.message + (e.filename ? " (" + e.filename.split("/").pop().split("?")[0] + ":" + e.lineno + ")" : ""));
+  }, true);
+  addEventListener("unhandledrejection", function (e) { __bootErrors.push("Błąd: " + (e.reason && (e.reason.message || e.reason))); });
+  setTimeout(function () {
+    if (window.__booted) return;
+    var box = document.getElementById("bootFail");
+    if (!box) return;
+    document.getElementById("bootErr").textContent = __bootErrors.join("\n") || "Brak szczegółów błędu.";
+    box.hidden = false;
+  }, 6000);
+  function __repairApp() {
+    var go = function () { location.replace(location.pathname + "?v=" + Date.now().toString(36)); };
+    var p = [];
+    if (navigator.serviceWorker) p.push(navigator.serviceWorker.getRegistrations().then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); }));
+    if (window.caches) p.push(caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); }));
+    Promise.all(p).then(go, go);
+  }
+</script>
 </head>
 <body>
 <div class="wrap">
@@ -100,6 +125,15 @@
     </div>
     <button class="ghost forgot" type="button" id="passForgot">Zapomniałem hasła</button>
   </form>
+</div>
+
+<div class="login" id="bootFail" hidden>
+  <div class="login-card">
+    <h1>Aplikacja się nie załadowała</h1>
+    <p>Najczęściej to niepełna kopia plików w telefonie. „Napraw” pobierze aplikację od nowa — zadania są bezpieczne na koncie.</p>
+    <pre class="boot-err" id="bootErr"></pre>
+    <div class="login-actions"><button class="btn" type="button" onclick="__repairApp()">Napraw i załaduj ponownie</button></div>
+  </div>
 </div>
 
 <script src="config.js"></script>
