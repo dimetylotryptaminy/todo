@@ -1,7 +1,7 @@
 import { parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v40";
+const APP_VERSION = "v41";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -1255,51 +1255,60 @@ function renderCalendar() {
   if (!upcoming.length) { const p = document.createElement("p"); p.className = "muted"; p.textContent = "Brak zaplanowanych wydarzeń. Stuknij dzień w kalendarzu albo „+ Dodaj wydarzenie”."; up.append(p); }
   else upcoming.forEach((e) => up.append(evChip(e, true)));
 
-  // 12 miesięcy
-  const grid = document.createElement("div"); grid.className = "months";
+  // Planer roczny w kolumnach (jak papierowy kalendarz ścienny): 12 kolumn = miesiące, w wierszach dni 1–31.
+  // Przy dniu: numer, skrót dnia tygodnia, numer tygodnia przy poniedziałku, nazwa święta albo wydarzenia drobnym drukiem.
+  const wall = document.createElement("div"); wall.className = "wall";
+  const wallIn = document.createElement("div"); wallIn.className = "wall-in";
+  const WD1 = ["Nd", "Pn", "Wt", "Śr", "Cz", "Pt", "So"];
+  const MON_SHORT = ["Sty", "Lut", "Mar", "Kwi", "Maj", "Cze", "Lip", "Sie", "Wrz", "Paź", "Lis", "Gru"];
+  const yy = String(calYear).slice(2);
   for (let m = 0; m < 12; m++) {
-    const mon = document.createElement("section"); mon.className = "month";
+    const col = document.createElement("section"); col.className = "wcol";
+    col.style.setProperty("--h", String(Math.round(285 + m * (215 / 11)) % 360));   // nagłówki w kolorach tęczy: fiolet → czerwień → żółć → zieleń → granat
     const first = new Date(calYear, m, 1), last = new Date(calYear, m + 1, 0);
-    const mStart = iso(first), mEnd = iso(last);
-    if (today >= mStart && today <= mEnd) mon.classList.add("current");
-    const h = document.createElement("h3"); h.textContent = MONTHS[m]; mon.append(h);
-    const tbl = document.createElement("div"); tbl.className = "mgrid";
-    WD.forEach((w, i) => { const c = document.createElement("span"); c.className = "wd" + (i >= 5 ? " we" : ""); c.textContent = w; tbl.append(c); });
-    const lead = (first.getDay() + 6) % 7;
-    for (let i = 0; i < lead; i++) tbl.append(document.createElement("span"));
+    if (today >= iso(first) && today <= iso(last)) col.classList.add("current");
+    const h = document.createElement("h3"); h.className = "whead"; h.textContent = MON_SHORT[m] + " " + yy; h.title = MONTHS[m] + " " + calYear;
+    col.append(h);
     for (let d = 1; d <= last.getDate(); d++) {
-      const date = new Date(calYear, m, d), key = iso(date);
+      const date = new Date(calYear, m, d), key = iso(date), dow = date.getDay();
       const on = evs.filter((e) => e.start <= key && e.end >= key);
-      const cell = document.createElement("button"); cell.type = "button"; cell.className = "day";
-      if ((date.getDay() + 6) % 7 >= 5) cell.classList.add("we");
-      if (hol[key]) { cell.classList.add("hol"); }
+      const cell = document.createElement("button"); cell.type = "button"; cell.className = "wday";
+      if (dow === 6) cell.classList.add("sat");
+      if (dow === 0 || hol[key]) cell.classList.add("sun");
       if (key === today) cell.classList.add("today");
       if (on.length) {
         const k = KINDS[on[0].kind] ? on[0].kind : "other";
         cell.classList.add("has", "k-" + k);
-        if (on[0].start === key) cell.classList.add("s");
-        if (on[0].end === key) cell.classList.add("e");
-        if (on.length > 1) cell.classList.add("multi");
+        if (on.length > 1) { cell.classList.add("multi"); const k2 = KINDS[on[1].kind] ? on[1].kind : "other"; cell.style.setProperty("--k2", "var(--ev-" + k2 + "-s)"); }
       }
-      cell.textContent = d;
+      const num = document.createElement("span"); num.className = "wnum"; num.textContent = pad(d);
+      const wd = document.createElement("span"); wd.className = "wwd"; wd.textContent = WD1[dow];
+      const txt = document.createElement("span"); txt.className = "wtxt";
+      const starting = on.filter((e) => e.start === key || d === 1);
+      if (starting.length) txt.textContent = starting.map((e) => e.title).join(" · ");
+      else if (hol[key]) { txt.textContent = hol[key]; txt.classList.add("hol"); }
+      cell.append(num, wd, txt);
+      if (dow === 1) { const wk = document.createElement("span"); wk.className = "wweek"; wk.textContent = isoWeek(date).week; cell.append(wk); }
       const label = d + " " + MONTHS_GEN[m] + (hol[key] ? ", " + hol[key] : "") + (on.length ? ": " + on.map((e) => e.title).join(", ") : "");
       cell.setAttribute("aria-label", label); cell.title = label;
       cell.addEventListener("click", () => { if (on.length === 1) openEventDialog(on[0].id); else openEventDialog(null, key); });
-      tbl.append(cell);
+      col.append(cell);
     }
-    mon.append(tbl);
-    const list = document.createElement("div"); list.className = "mlist";
-    evs.filter((e) => e.start <= mEnd && e.end >= mStart).forEach((e) => list.append(evChip(e, false)));
-    const holList = Object.entries(hol).filter(([k]) => k >= mStart && k <= mEnd);
-    if (holList.length) {
-      const hl = document.createElement("p"); hl.className = "hols";
-      hl.textContent = holList.map(([k, n]) => parseISO(k).getDate() + " " + n).join(" · ");
-      list.append(hl);
-    }
-    mon.append(list);
-    grid.append(mon);
+    wallIn.append(col);
   }
-  root.replaceChildren(head, legend, up, grid);
+  wall.append(wallIn);
+  // na telefonie planer przewija się w bok: zachowujemy miejsce przy odświeżeniu, a za pierwszym razem pokazujemy bieżący miesiąc
+  const prevWall = root.querySelector(".wall");
+  const keep = prevWall && prevWall.dataset.year === String(calYear) ? prevWall.scrollLeft : null;
+  wall.dataset.year = String(calYear);
+  root.replaceChildren(head, legend, up, wall);
+  if (wall.scrollWidth > wall.clientWidth) {
+    if (keep !== null) wall.scrollLeft = keep;
+    else {
+      const cur = wall.querySelector(".wcol.current");
+      if (cur) wall.scrollLeft = Math.max(0, cur.offsetLeft - 8);
+    }
+  }
 }
 
 // ---------- okno wydarzenia ----------
