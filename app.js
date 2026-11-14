@@ -1,7 +1,7 @@
 import { CATS, STATUS_CATS, parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v34";
+const APP_VERSION = "v35";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -302,7 +302,7 @@ let flashId = null, lastUndo = null;
 
 function write(id, data) {
   if (data === null) store.del(id); else store.put(id, data);
-  if (data && data.cat && (store.hidden || []).includes(data.cat)) setTimeout(() => note(`Zapisano w schowanym polu ${data.cat} — stuknij je na górze tablicy, żeby zobaczyć.`), 50);
+  if (data && data.cat && (store.hidden || []).includes(data.cat)) setTimeout(() => note(`Zapisano w zminimalizowanym polu ${data.cat} — przywrócisz je z granatowej belki na dole.`), 50);
 }
 
 function isoWeek(d) {
@@ -326,7 +326,21 @@ const sheet = $("sheet");
 const checkSvg = '<svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2 6.5l2.6 2.5L10 3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const boxes = {};
 
-const hideSvg = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const hideSvg = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17h12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="square"/></svg>';
+// Minimalizacja jak w dawnym Windowsie: pole „zjeżdża” do granatowej belki na dole, przycisk na belce je przywraca.
+const reduceMotion = () => window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+function minimize(cat) {
+  const box = $("box-" + slug(cat));
+  if (reduceMotion()) { setBoxHidden(cat, true); return; }
+  box.classList.add("minimizing");
+  setTimeout(() => { box.classList.remove("minimizing"); setBoxHidden(cat, true); }, 200);
+}
+function restore(cat) {
+  setBoxHidden(cat, false);
+  const box = $("box-" + slug(cat));
+  if (!reduceMotion()) { box.classList.add("restoring"); setTimeout(() => box.classList.remove("restoring"), 260); }
+  setTimeout(() => box.scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "nearest" }), 30);
+}
 function setBoxHidden(cat, hide) {
   const cur = (store && store.hidden) || [];
   const next = hide ? [...new Set([...cur, cat])] : cur.filter((c) => c !== cat);
@@ -334,9 +348,6 @@ function setBoxHidden(cat, hide) {
 }
 
 function buildSheet() {
-  const strip = document.createElement("div");
-  strip.className = "hidden-strip"; strip.id = "hiddenStrip"; strip.hidden = true;
-  sheet.append(strip);
   for (const cat of CATS) {
     const box = document.createElement("section");
     box.className = "box" + (cat === "INNE" ? " inne" : "") + (STATUS_CATS.includes(cat) ? " statusbox" : "");
@@ -347,8 +358,8 @@ function buildSheet() {
     const right = document.createElement("span"); right.className = "hright";
     const hide = document.createElement("button");
     hide.type = "button"; hide.className = "boxhide"; hide.innerHTML = hideSvg;
-    hide.setAttribute("aria-label", "Schowaj pole " + cat); hide.title = "Schowaj pole";
-    hide.addEventListener("click", () => setBoxHidden(cat, true));
+    hide.setAttribute("aria-label", "Minimalizuj pole " + cat); hide.title = "Minimalizuj";
+    hide.addEventListener("click", () => minimize(cat));
     right.append(n, hide, boxMic(cat));
     h.append(name, right);
     const ul = document.createElement("ul");
@@ -446,21 +457,23 @@ function renderHidden() {
     if (pos === 6) { box.classList.add("col2"); pos = 0; }      // ostatnie w rzędzie: bez prawej linii
   }
 
-  const strip = $("hiddenStrip");
-  strip.hidden = !hidden.length;
-  const label = document.createElement("span"); label.className = "hs-label"; label.textContent = "Schowane:";
-  const chips = hidden.map((cat) => {
+  const bar = $("taskbar");
+  bar.hidden = !hidden.length;
+  document.body.classList.toggle("has-taskbar", hidden.length > 0);
+  const tasks = hidden.map((cat) => {
     const b = document.createElement("button");
-    b.type = "button"; b.className = "chip";
-    b.setAttribute("aria-label", "Pokaż pole " + cat);
-    const nm = document.createElement("span"); nm.textContent = cat;
-    b.append(nm);
+    b.type = "button"; b.className = "task";
     const open = boxes[cat] ? boxes[cat].open : 0;
-    if (open) { const c = document.createElement("span"); c.className = "chip-n"; c.textContent = open; b.append(c); }
-    b.addEventListener("click", () => setBoxHidden(cat, false));
+    b.setAttribute("aria-label", "Przywróć pole " + cat + (open ? ", otwarte zadania: " + open : ""));
+    b.title = "Przywróć";
+    const ico = document.createElement("span"); ico.className = "task-ico"; ico.setAttribute("aria-hidden", "true");
+    const nm = document.createElement("span"); nm.className = "task-name"; nm.textContent = cat;
+    b.append(ico, nm);
+    if (open) { const c = document.createElement("span"); c.className = "task-n"; c.textContent = open; b.append(c); }
+    b.addEventListener("click", () => restore(cat));
     return b;
   });
-  strip.replaceChildren(label, ...chips);
+  bar.replaceChildren(...tasks);
 }
 
 function render() {
