@@ -751,3 +751,8 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none 
 .topinfo { flex-basis: 330px; }
 .ti-motto.hand { max-width: 330px; margin-bottom: 4px; }
 @media (max-width: 760px) { .ti-motto.hand { width: min(260px, 72vw); margin-bottom: 0; } }
+/* data i tydzień pod mottem */
+.ti-date { order: 1; }
+.topline { align-items: center; }
+.topline .tabs { align-self: center; }
+.ti-motto.hand { margin-bottom: 0; }
