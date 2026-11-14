@@ -1,7 +1,7 @@
 import { parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v41";
+const APP_VERSION = "v42";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -1205,6 +1205,15 @@ function holidays(y) {
 }
 
 let calYear = new Date().getFullYear();
+let calMonth = new Date().getMonth();
+const phoneMQ = window.matchMedia("(max-width: 640px)");
+const phoneCal = () => phoneMQ.matches;
+phoneMQ.addEventListener ? phoneMQ.addEventListener("change", () => { if (view === "calendar") renderCalendar(); }) : null;
+function shiftMonth(d) {
+  calMonth += d;
+  if (calMonth < 0) { calMonth = 11; calYear--; } else if (calMonth > 11) { calMonth = 0; calYear++; }
+  renderCalendar();
+}
 const fmtRange = (ev) => {
   const a = parseISO(ev.start), b = parseISO(ev.end);
   if (ev.start === ev.end) return a.getDate() + " " + MONTHS_GEN[a.getMonth()];
@@ -1249,7 +1258,7 @@ function renderCalendar() {
   for (const [k, n] of Object.entries(KINDS)) { const s = document.createElement("span"); s.className = "lg k-" + k; s.innerHTML = '<i aria-hidden="true"></i>'; s.append(n); legend.append(s); }
 
   // najbliższe
-  const upcoming = evs.filter((e) => e.end >= today).slice(0, 5);
+  const upcoming = evs.filter((e) => e.end >= today).slice(0, phoneCal() ? 3 : 5);
   const up = document.createElement("div"); up.className = "upcoming";
   const upH = document.createElement("h3"); upH.textContent = "Najbliższe"; up.append(upH);
   if (!upcoming.length) { const p = document.createElement("p"); p.className = "muted"; p.textContent = "Brak zaplanowanych wydarzeń. Stuknij dzień w kalendarzu albo „+ Dodaj wydarzenie”."; up.append(p); }
@@ -1262,7 +1271,7 @@ function renderCalendar() {
   const WD1 = ["Nd", "Pn", "Wt", "Śr", "Cz", "Pt", "So"];
   const MON_SHORT = ["Sty", "Lut", "Mar", "Kwi", "Maj", "Cze", "Lip", "Sie", "Wrz", "Paź", "Lis", "Gru"];
   const yy = String(calYear).slice(2);
-  for (let m = 0; m < 12; m++) {
+  const monthCol = (m) => {
     const col = document.createElement("section"); col.className = "wcol";
     col.style.setProperty("--h", String(Math.round(285 + m * (215 / 11)) % 360));   // nagłówki w kolorach tęczy: fiolet → czerwień → żółć → zieleń → granat
     const first = new Date(calYear, m, 1), last = new Date(calYear, m + 1, 0);
@@ -1294,8 +1303,45 @@ function renderCalendar() {
       cell.addEventListener("click", () => { if (on.length === 1) openEventDialog(on[0].id); else openEventDialog(null, key); });
       col.append(cell);
     }
-    wallIn.append(col);
+    return col;
+  };
+
+  // TELEFON: jeden miesiąc na całą szerokość (ten sam papierowy styl), zmiana miesiąca palcem w bok, strzałkami
+  // albo z paska miesięcy. KOMPUTER: wszystkie 12 kolumn obok siebie.
+  if (phoneCal()) {
+    const box = document.createElement("div"); box.className = "mview";
+    const nav = document.createElement("div"); nav.className = "mnav";
+    const pv = document.createElement("button"); pv.type = "button"; pv.className = "yearbtn"; pv.textContent = "‹"; pv.setAttribute("aria-label", "Poprzedni miesiąc");
+    const nx = document.createElement("button"); nx.type = "button"; nx.className = "yearbtn"; nx.textContent = "›"; nx.setAttribute("aria-label", "Następny miesiąc");
+    const title = document.createElement("h2"); title.className = "mtitle"; title.textContent = MONTHS[calMonth] + " " + calYear;
+    title.style.setProperty("--h", String(Math.round(285 + calMonth * (215 / 11)) % 360));
+    pv.addEventListener("click", () => shiftMonth(-1)); nx.addEventListener("click", () => shiftMonth(1));
+    nav.append(pv, title, nx);
+    const chips = document.createElement("div"); chips.className = "mchips";
+    MON_SHORT.forEach((n, i) => {
+      const c = document.createElement("button"); c.type = "button"; c.className = "mchip" + (i === calMonth ? " on" : "");
+      c.style.setProperty("--h", String(Math.round(285 + i * (215 / 11)) % 360));
+      const cnt = evs.filter((e) => e.start <= iso(new Date(calYear, i + 1, 0)) && e.end >= iso(new Date(calYear, i, 1))).length;
+      c.textContent = n; if (cnt) { const d = document.createElement("i"); d.setAttribute("aria-hidden", "true"); c.append(d); }
+      c.setAttribute("aria-label", MONTHS[i] + (cnt ? ", wydarzeń: " + cnt : ""));
+      c.addEventListener("click", () => { calMonth = i; renderCalendar(); });
+      chips.append(c);
+    });
+    const col = monthCol(calMonth); col.classList.add("single");
+    col.querySelector(".whead").remove();
+    // przesunięcie palcem w bok = poprzedni / następny miesiąc
+    let x0 = null, y0 = null;
+    col.addEventListener("touchstart", (e) => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, { passive: true });
+    col.addEventListener("touchend", (e) => {
+      if (x0 === null) return;
+      const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0; x0 = null;
+      if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) shiftMonth(dx < 0 ? 1 : -1);
+    }, { passive: true });
+    box.append(nav, chips, col);
+    root.replaceChildren(head, legend, up, box);
+    return;
   }
+  for (let m = 0; m < 12; m++) wallIn.append(monthCol(m));
   wall.append(wallIn);
   // na telefonie planer przewija się w bok: zachowujemy miejsce przy odświeżeniu, a za pierwszym razem pokazujemy bieżący miesiąc
   const prevWall = root.querySelector(".wall");

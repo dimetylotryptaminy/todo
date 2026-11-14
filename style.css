@@ -466,3 +466,32 @@ body.view-calendar .wrap { max-width: 1480px; }
   .wall-in { grid-template-columns: repeat(12, 128px); }
   .wday { height: 32px; line-height: 32px; }
 }
+
+/* ---------- telefon: jeden miesiąc na całą szerokość ---------- */
+.mview { display: flex; flex-direction: column; gap: 10px; }
+.mnav { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mtitle { margin: 0; font-size: 26px; font-weight: 700; color: hsl(var(--h) 52% 40%); text-align: center; flex: 1; }
+.mchips { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.mchip {
+  position: relative; min-height: 34px; border: 1px solid var(--hair); border-radius: 8px; background: var(--paper);
+  color: hsl(var(--h) 45% 38%); font: 600 13px/1 var(--font); cursor: pointer;
+}
+.mchip.on { background: hsl(var(--h) 45% 40%); border-color: transparent; color: #fff; }
+.mchip i { position: absolute; top: 4px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.wcol.single { border-top: 2px solid var(--line); }
+.wcol.single .wday { height: 46px; line-height: 46px; font-size: 15px; grid-template-columns: 34px 30px 1fr auto; padding: 0 10px; }
+.wcol.single .wnum { font-size: 19px; }
+.wcol.single .wwd { font-size: 13px; }
+.wcol.single .wtxt { font-size: 14px; }
+.wcol.single .wweek { font-size: 15px; }
+@media (prefers-color-scheme: dark) {
+  .mtitle { color: hsl(var(--h) 60% 72%); }
+  .mchip { color: hsl(var(--h) 60% 72%); }
+  .mchip.on { background: hsl(var(--h) 40% 45%); color: #fff; }
+}
+@media (max-width: 640px) {
+  /* telefon: rok widać w tytule miesiąca, a strzałki ‹ › przechodzą też między latami; kolory objaśnia okno wydarzenia */
+  .cal .yearnav, .cal .legend { display: none; }
+  .cal-head { justify-content: stretch; }
+  .cal-add { flex: 1; }
+}
