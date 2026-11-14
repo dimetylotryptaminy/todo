@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v75";
+const APP_VERSION = "v76";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -1383,7 +1383,7 @@ function restoreAfterReload() {
 
 // Przycisk „Odśwież aplikację”: czyści zapamiętane pliki aplikacji i ładuje najnowszą wersję z serwera.
 // Zadania zostają (są na koncie i w pamięci urządzenia), czyścimy tylko kopię plików aplikacji.
-$("ver").textContent = "Wersja " + APP_VERSION;
+// numer wersji jest w stopce tablicy (obok e-maila), więc przy „Odśwież aplikację” go nie powtarzamy
 $("refreshApp").addEventListener("click", async () => {
   const b = $("refreshApp");
   // Bez internetu nie ruszamy kopii aplikacji — działa zapisana wersja.
