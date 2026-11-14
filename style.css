@@ -682,3 +682,25 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none 
 .arch-text { min-width: 0; overflow-wrap: anywhere; font-size: 14.5px; color: var(--ink-soft); }
 .arch-row .ghost { font-size: 13px; padding: 4px; }
 .arch-row .x { opacity: 1; }
+
+/* powtórki słówek */
+.wreview { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 14px 16px; border-radius: 14px; background: color-mix(in srgb, var(--accent) 9%, var(--paper)); }
+.wreview:empty { display: none; }
+.wreview-txt { display: flex; flex-direction: column; gap: 2px; }
+.wreview-txt strong { font-size: 16px; }
+.wreview-txt span { font-size: 14px; color: var(--ink-soft); }
+.wreview-go { min-height: 44px; }
+.wreview-none { margin: 0; }
+.wreview:has(.wreview-none) { background: none; padding: 0 4px; }
+.rv-head { display: flex; justify-content: space-between; align-items: center; }
+.rv-count { font-size: 13px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); }
+.rv-card { max-width: 640px; width: 100%; margin: 0 auto; }
+.rv-ask { margin: 4px 0 0; color: var(--ink-soft); font-size: 16px; }
+.rv-show { align-self: flex-start; min-height: 46px; margin-top: 6px; }
+.rv-ans { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+.rv-ans button { min-height: 52px; border-radius: 12px; font: 600 16px/1 var(--font); cursor: pointer; border: 0; color: #fff; }
+.rv-no { background: #b91c1c; }
+.rv-yes { background: #1f6f43; }
+.rv-done { text-align: center; display: flex; flex-direction: column; gap: 10px; align-items: center; padding: 30px 0; }
+.rv-done h2 { margin: 0; font-size: 26px; }
+.rv-done p { margin: 0; color: var(--ink-soft); }

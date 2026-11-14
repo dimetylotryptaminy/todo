@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v60";
+const APP_VERSION = "v61";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -51,6 +51,8 @@ function localStore() {
     setMotto(m) { s.motto = m; lsSet("motto", m); s.onChange(); },
     hidden: lsGet("hidden", []),
     setHidden(h) { s.hidden = h; lsSet("hidden", h); s.onChange(); },
+    srs: lsGet("srs", {}),
+    setSrs(k, v) { s.srs = { ...s.srs, [k]: v }; lsSet("srs", s.srs); },
     fields: lsGet("fields", null),
     setFields(f) { s.fields = f; lsSet("fields", f); s.onChange(); },
   };
@@ -146,6 +148,7 @@ async function firebaseStore(config) {
         s.hidden = (user && lsGet(key("hidden"), null)) || [];
         s.fields = (user && lsGet(key("fields"), null)) || null;
         s.calendarId = (user && lsGet(key("calid"), null)) || null;
+        s.srs = (user && lsGet(key("srs"), null)) || {};
         if (s.calendarId) openCal(s.calendarId, false);
         showLogin(!user);
         refreshMeta(); cb();
@@ -174,6 +177,12 @@ async function firebaseStore(config) {
     setHidden(h) {
       s.hidden = h; lsSet(key("hidden"), h); s.onChange();
       F.setDoc(F.doc(db, "users", s.uid), { hidden: h }, { merge: true }).catch(writeErr);
+    },
+    // powtórki słówek: users/{uid}.srs = {"es|la merienda": {b: przegródka 0–4, due: "RRRR-MM-DD"}, …}
+    srs: {},
+    setSrs(k, v) {
+      s.srs = { ...s.srs, [k]: v }; lsSet(key("srs"), s.srs);
+      F.setDoc(F.doc(db, "users", s.uid), { srs: { [k]: v } }, { merge: true }).catch(writeErr);
     },
     // słówka dnia: users/{uid}/daily/{RRRR-MM-DD} = {es: [...], en: [...]}; historia słów w users/{uid}.wordHistory
     wordHistory: { es: [], en: [] },
@@ -247,6 +256,7 @@ async function firebaseStore(config) {
       if (m !== s.motto) { s.motto = m; lsSet(key("motto"), m); s.onChange(); }
       const h = Array.isArray(data.hidden) ? data.hidden : null;
       if (h && JSON.stringify(h) !== JSON.stringify(s.hidden)) { s.hidden = h; lsSet(key("hidden"), h); s.onChange(); }
+      if (data.srs && typeof data.srs === "object") { s.srs = data.srs; lsSet(key("srs"), data.srs); }
       const wh = data.wordHistory;
       if (wh) s.wordHistory = { es: Array.isArray(wh.es) ? wh.es : [], en: Array.isArray(wh.en) ? wh.en : [] };
       const fl = Array.isArray(data.fields) && data.fields.length ? data.fields : null;
@@ -1864,15 +1874,87 @@ async function renderWords(force = false) {
     back.addEventListener("click", () => { wordsOffset = 0; renderWords(); });
     nodes.push(back);
   }
+  const review = document.createElement("section"); review.className = "wreview"; review.setAttribute("aria-label", "Powtórka słówek");
   const hist = document.createElement("section"); hist.className = "whist"; hist.setAttribute("aria-label", "Poprzednie słówka");
-  nodes.push(hist);
+  nodes.push(review, hist);
   root.replaceChildren(...nodes);
-  renderWordHistory(hist, iso(d), seq);
+  paintReview(review);
+  renderWordHistory(hist, iso(d), seq, () => paintReview(review));
+}
+
+// ---------- powtórki (metoda przegródek: 1, 3, 7, 30, 90 dni) ----------
+// Słówko z dnia D trafia do powtórki następnego dnia. „Pamiętam” przesuwa je do kolejnej przegródki (dłuższa przerwa),
+// „Nie pamiętam” — z powrotem na początek (powtórka jutro).
+const SRS_DAYS = [1, 3, 7, 30, 90];
+const addDays = (dateISO, n) => { const d = parseISO(dateISO); d.setDate(d.getDate() + n); return iso(d); };
+const srsKey = (lang, word) => lang + "|" + word;
+function dueWords() {
+  const today = iso(new Date()), srs = (store && store.srs) || {}, out = [];
+  for (const [date, w] of Object.entries(lsGet(wordsCacheKey(), {})).sort()) {
+    if (date >= today || !w || !w.es || !w.en) continue;
+    for (const lang of ["es", "en"]) {
+      const entry = w[lang], k = srsKey(lang, entry[0]);
+      const st = srs[k] || { b: 0, due: addDays(date, 1) };
+      if (st.due <= today) out.push({ lang, entry, k, st });
+    }
+  }
+  return out;
+}
+function paintReview(box) {
+  if (!box.isConnected) return;
+  const due = dueWords();
+  const known = Object.keys(lsGet(wordsCacheKey(), {})).some((k) => k < iso(new Date()));
+  if (!known) { box.replaceChildren(); return; }
+  if (!due.length) { box.replaceChildren(el("p", "muted wreview-none", "Powtórka: na dziś wszystko powtórzone ✓")); return; }
+  const go = el("button", "btn wreview-go", "Zacznij powtórkę"); go.type = "button";
+  go.addEventListener("click", () => startReview(due.slice(0, 20)));
+  const txt = el("div", "wreview-txt");
+  txt.append(el("strong", "", "Powtórka"), el("span", "", (due.length === 1 ? "1 słówko czeka" : due.length + (due.length % 10 >= 2 && due.length % 10 <= 4 && (due.length % 100 < 12 || due.length % 100 > 14) ? " słówka czekają" : " słówek czeka")) + " na powtórkę"));
+  box.replaceChildren(txt, go);
+}
+function startReview(queue) {
+  const root = $("words");
+  let i = 0, good = 0;
+  const step = () => {
+    if (i >= queue.length) {
+      const back = el("button", "btn", "Wróć do słówek"); back.type = "button"; back.addEventListener("click", () => renderWords());
+      const fin = el("div", "rv-done");
+      fin.append(el("h2", "", "Gotowe! 🎉"), el("p", "", "Pamiętałeś " + good + " z " + queue.length + ". Kolejne powtórki aplikacja zaplanuje sama."), back);
+      root.replaceChildren(fin); return;
+    }
+    const { lang, entry, k, st } = queue[i];
+    const [word, meaning, example, exPl] = entry;
+    const ttsLang = lang === "es" ? "es-ES" : "en-GB";
+    const head = el("div", "rv-head");
+    const quit = el("button", "ghost", "Zakończ"); quit.type = "button"; quit.addEventListener("click", () => renderWords());
+    head.append(el("span", "rv-count", "Powtórka " + (i + 1) + " z " + queue.length), quit);
+    const card = el("article", "wcard rv-card " + lang);
+    const top = el("div", "wc-top"); const tag = el("b", "htag " + lang, lang.toUpperCase()); top.append(tag, el("span", "wc-lang", lang === "es" ? "hiszpański" : "angielski"));
+    const say = (text) => { const b = el("button", "say"); b.type = "button"; b.innerHTML = speakerSvg; b.setAttribute("aria-label", "Odsłuchaj"); b.addEventListener("click", () => speak(text, ttsLang, b)); return b; };
+    const wrow = el("div", "wc-word"); const h = el("h3", "", word); h.lang = ttsLang; wrow.append(h, say(word));
+    const ask = el("p", "rv-ask", "Co to znaczy?");
+    const show = el("button", "btn rv-show", "Pokaż odpowiedź"); show.type = "button";
+    card.append(top, wrow, ask, show);
+    show.addEventListener("click", () => {
+      show.remove(); ask.remove();
+      const ex = el("div", "wc-ex"); const sent = el("p", "wc-sent", example); sent.lang = ttsLang; ex.append(sent, say(example));
+      const ans = el("div", "rv-ans");
+      const no = el("button", "rv-no", "✗ Nie pamiętam"); no.type = "button";
+      const yes = el("button", "rv-yes", "✓ Pamiętam"); yes.type = "button";
+      const today = iso(new Date());
+      no.addEventListener("click", () => { store.setSrs(k, { b: 0, due: addDays(today, 1) }); i++; step(); });
+      yes.addEventListener("click", () => { const nb = Math.min((st.b || 0) + 1, SRS_DAYS.length - 1); store.setSrs(k, { b: nb, due: addDays(today, SRS_DAYS[nb]) }); good++; i++; step(); });
+      ans.append(no, yes);
+      card.append(el("p", "wc-mean", meaning), ex, el("p", "wc-tr", exPl), ans);
+    });
+    root.replaceChildren(head, card);
+  };
+  step();
 }
 
 // Lista poprzednich słówek (drobnym tekstem): data · słówko hiszpańskie · słówko angielskie.
 // Kliknięcie przenosi do tamtego dnia — z oboma słówkami i przykładami.
-async function renderWordHistory(box, shownDate, seq) {
+async function renderWordHistory(box, shownDate, seq, onLoaded) {
   const today = iso(new Date());
   const byDate = {};
   for (const [k, w] of Object.entries(lsGet(wordsCacheKey(), {}))) if (w && w.es && w.en) byDate[k] = w;
@@ -1909,6 +1991,7 @@ async function renderWordHistory(box, shownDate, seq) {
       for (const w of all) if (w.es && w.en) { byDate[w.date] = w; cache[w.date] = { es: w.es, en: w.en }; }
       lsSet(wordsCacheKey(), cache);
       paint();
+      if (onLoaded) onLoaded();
     } catch (e) { dbg("historia słówek: " + (e && (e.code || e.message))); }
   }
 }
