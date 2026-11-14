@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v56";
+const APP_VERSION = "v57";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -361,6 +361,17 @@ const DEFAULT_FIELDS = [
   ...["STATUS BETI", "STATUS KAROL", "STATUS BIOTTS"].map((n) => ({ id: n, name: n, size: "third" })),
 ];
 const SIZE_SPAN = { full: 6, half: 3, third: 2 };
+// Kolor paska nagłówka pola. Domyślne kolory spółek; dawne pastelowe „tła” przekładamy na najbliższy kolor.
+const HEAD_COLORS = ["slate", "blue", "teal", "green", "purple", "pink", "orange", "amber", "navy", "red"];
+const DEFAULT_COLOR = { INNE: "slate", BIOTTS: "blue", NESTMEDIC: "teal", GENOMTEC: "purple", ORTHOGET: "orange", BIOACCURE: "pink", TRENDCAPITAL: "green",
+  "STATUS BETI": "navy", "STATUS KAROL": "navy", "STATUS BIOTTS": "navy" };
+const OLD_BG = { mint: "green", sky: "blue", rose: "pink", lemon: "amber", sand: "orange", peach: "orange", lavender: "purple", gray: "slate" };
+function fieldColor(f) {
+  if (f.color && HEAD_COLORS.includes(f.color)) return f.color;
+  if (f.bg && OLD_BG[f.bg]) return OLD_BG[f.bg];
+  return DEFAULT_COLOR[f.id] || HEAD_COLORS[[...String(f.id)].reduce((a, c) => a + c.charCodeAt(0), 0) % HEAD_COLORS.length];
+}
+const nextFreeColor = () => { const used = fieldList().map(fieldColor); return HEAD_COLORS.find((c) => !used.includes(c)) || "blue"; };
 const fieldList = () => (store && Array.isArray(store.fields) && store.fields.length ? store.fields : DEFAULT_FIELDS);
 const fieldIds = () => fieldList().map((f) => f.id);
 const fieldName = (id) => (fieldList().find((f) => f.id === id) || {}).name || id;
@@ -394,8 +405,7 @@ function makeBox(f) {
   const cat = f.id;
   const box = document.createElement("section");
   // tło: wybrane w oknie edycji; pola bez wyboru zachowują dawny wygląd (pola 1/3 lekko szare)
-  const bg = f.bg || (f.size === "third" ? "gray" : "none");
-  box.className = "box" + (bg !== "none" ? " bg-" + bg : "");
+  box.className = "box hc-" + fieldColor(f);
   box.id = "box-" + slug(cat);
   const h = document.createElement("h2");
   const name = document.createElement("button");
@@ -548,8 +558,8 @@ function openFieldDialog(id) {
   $("fieldTitle").textContent = id ? "Edytuj pole" : "Nowe pole";
   $("fieldName").value = f.name;
   document.querySelectorAll('input[name="fsize"]').forEach((r) => { r.checked = r.value === f.size; });
-  const bg = f.bg || (id && f.size === "third" ? "gray" : "none");
-  document.querySelectorAll('input[name="fbg"]').forEach((r) => { r.checked = r.value === bg; });
+  const col = id ? fieldColor(f) : nextFreeColor();
+  document.querySelectorAll('input[name="fbg"]').forEach((r) => { r.checked = r.value === col; });
   $("fieldMove").hidden = !id;
   $("fieldDelete").hidden = !id;
   resetDelete();
@@ -568,14 +578,14 @@ $("fieldForm").addEventListener("submit", (e) => {
   const name = $("fieldName").value.trim().replace(/\s+/g, " ");
   if (!name) { $("fieldErr").textContent = "Wpisz nazwę pola."; return; }
   const size = (document.querySelector('input[name="fsize"]:checked') || {}).value || "half";
-  const bg = (document.querySelector('input[name="fbg"]:checked') || {}).value || "none";
+  const color = (document.querySelector('input[name="fbg"]:checked') || {}).value || "slate";
   const list = fieldList().map((f) => ({ ...f }));
   if (editing) {
-    const f = list.find((x) => x.id === editing); if (f) { f.name = name; f.size = size; f.bg = bg; }
+    const f = list.find((x) => x.id === editing); if (f) { f.name = name; f.size = size; f.color = color; }
     store.setFields(list);
     note(`Zapisano pole ${name}.`);
   } else {
-    list.push({ id: "f" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name, size, bg });
+    list.push({ id: "f" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name, size, color });
     store.setFields(list);
     note(`Dodano pole ${name} — jest na końcu tablicy.`);
     setTimeout(() => { const last = sheet.querySelectorAll(".box"); const b = last[last.length - 1]; if (b) b.scrollIntoView({ behavior: "smooth", block: "center" }); }, 60);

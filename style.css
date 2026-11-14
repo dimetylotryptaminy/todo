@@ -573,3 +573,69 @@ body.view-calendar .wrap { max-width: 1480px; }
 .wh-es::before, .wh-en::before { font: 700 8.5px/1 var(--font); padding: 2px 3px; border-radius: 3px; margin-right: 6px; vertical-align: 1px; }
 .wh-es::before { content: "ES"; background: #d4a20f; color: #3a2a00; }
 .wh-en::before { content: "EN"; background: #1f4fa8; color: #fff; }
+
+/* ===================== WYGLĄD „B · KOLOROWE NAGŁÓWKI” ===================== */
+/* Pola jako zaokrąglone karty z odstępami i kolorowym paskiem nagłówka; okrągłe ptaszki; zakładki-pigułki. */
+:root { --card-shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px rgba(30,40,30,.07); }
+@media (prefers-color-scheme: dark) { :root { --card-shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35); } }
+.hc-slate { --hd: #4b5563; }
+.hc-blue { --hd: #2f6db5; }
+.hc-teal { --hd: #0f8a7a; }
+.hc-green { --hd: #1f6f43; }
+.hc-purple { --hd: #7a4cc2; }
+.hc-pink { --hd: #be185d; }
+.hc-orange { --hd: #c2410c; }
+.hc-amber { --hd: #a16207; }
+.hc-navy { --hd: #1e3a8a; }
+.hc-red { --hd: #b91c1c; }
+
+.sheet { background: transparent; border: 0; box-shadow: none; gap: 14px; }
+.box { border: 0 !important; border-radius: 18px; background: var(--paper); box-shadow: var(--card-shadow); padding: 0 0 12px; overflow: hidden; min-height: 200px; }
+.box.inne { min-height: 200px; }
+.box h2 { margin: 0; padding: 10px 12px 10px 16px; min-height: 52px; align-items: center; font-size: 13.5px; font-weight: 700; letter-spacing: .07em; color: #fff; background: var(--hd, #4b5563); }
+.box h2 .fname:hover { background: rgba(255,255,255,.14); }
+.box h2 .fname svg { opacity: .7; }
+.box h2 .n { color: rgba(255,255,255,.85); }
+.box h2 .boxhide { color: rgba(255,255,255,.9); }
+.box h2 .boxhide:hover { border-color: rgba(255,255,255,.45); color: #fff; }
+.box h2 .boxmic { background: rgba(255,255,255,.18); border-color: transparent; color: #fff; }
+.box h2 .boxmic:hover { background: rgba(255,255,255,.3); }
+.box h2 .boxmic.on { background: var(--warn); }
+.box h2 .fname:focus-visible, .box h2 .boxhide:focus-visible, .box h2 .boxmic:focus-visible { outline-color: #fff; }
+.box ul { padding: 8px 16px 0; }
+.box .add { padding: 6px 18px; width: auto; }
+.box li { border-bottom: 0; padding: 5px 0; }
+.chk { border-radius: 50%; width: 22px; height: 22px; border-width: 2px; border-color: color-mix(in srgb, var(--accent) 55%, var(--hair)); }
+li.done .chk { background: var(--accent); border-color: var(--accent); }
+.box.target { box-shadow: var(--card-shadow), 0 0 0 3px var(--hd, var(--accent)); background: var(--paper); }
+.foot { border-radius: 18px; background: var(--paper); box-shadow: var(--card-shadow); padding: 14px 20px; }
+
+/* zakładki jako przełącznik-pigułka */
+.tabs { margin-bottom: 2px; padding: 4px; gap: 4px; background: color-mix(in srgb, var(--ink) 8%, var(--desk)); border-radius: 14px; align-self: flex-start; }
+.tab { min-height: 40px; padding: 0 18px; margin: 0; border-radius: 10px; }
+.tab::before { display: none; }
+.tab.active { background: var(--paper); box-shadow: 0 1px 3px rgba(0,0,0,.14); color: var(--ink); }
+.tab:not(.active) { padding-top: 0; min-height: 40px; }
+.tab:not(.active):hover { background: color-mix(in srgb, var(--paper) 55%, transparent); }
+
+/* kalendarz i słówka też jako zaokrąglone karty */
+.cal { border: 0; border-radius: 18px; box-shadow: var(--card-shadow); }
+
+/* kółka kolorów w oknie edycji pola */
+.sw.hc-slate span { background: #4b5563; border-color: transparent; }
+.sw.hc-blue span { background: #2f6db5; border-color: transparent; }
+.sw.hc-teal span { background: #0f8a7a; border-color: transparent; }
+.sw.hc-green span { background: #1f6f43; border-color: transparent; }
+.sw.hc-purple span { background: #7a4cc2; border-color: transparent; }
+.sw.hc-pink span { background: #be185d; border-color: transparent; }
+.sw.hc-orange span { background: #c2410c; border-color: transparent; }
+.sw.hc-amber span { background: #a16207; border-color: transparent; }
+.sw.hc-navy span { background: #1e3a8a; border-color: transparent; }
+.sw.hc-red span { background: #b91c1c; border-color: transparent; }
+
+@media (max-width: 640px) {
+  .tabs { align-self: stretch; }
+  .tab { flex: 1; padding: 0 6px; }
+  .sheet { gap: 12px; }
+  .box { min-height: 0; }
+}
