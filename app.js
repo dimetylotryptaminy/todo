@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v76";
+const APP_VERSION = "v77";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -186,13 +186,15 @@ async function firebaseStore(config) {
     },
     // słówka dnia: users/{uid}/daily/{RRRR-MM-DD} = {es: [...], en: [...]}; historia słów w users/{uid}.wordHistory
     wordHistory: { es: [], en: [] },
+    // Słówka dnia są wspólne dla osób ze wspólnego kalendarza (calendars/{cid}/daily), więc oboje macie te same;
+    // bez wspólnego kalendarza — prywatne (users/{uid}/daily).
     async listDaily() {
-      const qs = await F.getDocs(F.collection(db, "users", s.uid, "daily"));
+      const qs = await F.getDocs(F.collection(db, ...dailyPath()));
       const out = []; qs.forEach((d) => out.push({ date: d.id, ...d.data() })); return out;
     },
-    async getDaily(date) { const d = await F.getDoc(F.doc(db, "users", s.uid, "daily", date)); return d.exists() ? d.data() : null; },
+    async getDaily(date) { const d = await F.getDoc(F.doc(db, ...dailyPath(), date)); return d.exists() ? d.data() : null; },
     async setDaily(date, data) {
-      await F.setDoc(F.doc(db, "users", s.uid, "daily", date), data);
+      await F.setDoc(F.doc(db, ...dailyPath(), date), data);
       await F.setDoc(F.doc(db, "users", s.uid), { wordHistory: { es: F.arrayUnion(data.es[0]), en: F.arrayUnion(data.en[0]) } }, { merge: true });
     },
     fields: null,
@@ -227,6 +229,8 @@ async function firebaseStore(config) {
       return d.exists() ? d.data() : null;
     },
   };
+
+  const dailyPath = () => (s.calendarId ? ["calendars", s.calendarId, "daily"] : ["users", s.uid, "daily"]);
 
   // przypięcie konta do wspólnego kalendarza + przeniesienie do niego dotychczasowych wydarzeń
   async function linkCalendar(cid) {
@@ -825,7 +829,7 @@ function renderInner() {
   if (hand) $("tiMotto").setAttribute("aria-label", store.motto); else $("tiMotto").removeAttribute("aria-label");
   if (view === "calendar") renderCalendar();
   // słówko: po zalogowaniu (albo zmianie dnia) przerysuj raz, żeby pobrać słówko z konta / od AI
-  if (view === "words") { const k = (store.uid || "local") + "|" + iso(new Date()); if (k !== wordsShownFor) { wordsShownFor = k; renderWords(); } }
+  if (view === "words") { const k = (store.uid || "local") + "|" + (store.calendarId || "") + "|" + iso(new Date()); if (k !== wordsShownFor) { wordsShownFor = k; renderWords(); } }
   renderStatus();
 }
 document.addEventListener("focusout", () => setTimeout(render, 0));
@@ -1797,7 +1801,8 @@ function wordCard(code, langName, ttsLang, entry) {
 
 // Słówko dla danego dnia: najpierw kopia w urządzeniu, potem konto (Firebase), a dla dzisiejszego dnia —
 // jeśli jeszcze go nie ma — nowe słówko od AI (przez serwer w Cloudflare). Bez internetu lub przy błędzie: lista wbudowana.
-const wordsCacheKey = () => "words." + ((store && store.uid) || "local");
+// kopia słówek w urządzeniu — osobna dla wspólnego kalendarza, żeby oboje widzieli te same słówka
+const wordsCacheKey = () => "words." + (store && store.calendarId ? "cal." + store.calendarId : (store && store.uid) || "local");
 const staticWords = (n) => ({
   es: ES_WORDS[((n % ES_WORDS.length) + ES_WORDS.length) % ES_WORDS.length],
   en: EN_WORDS[(((n * 37 + 11) % EN_WORDS.length) + EN_WORDS.length) % EN_WORDS.length],
