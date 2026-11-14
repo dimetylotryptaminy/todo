@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v53";
+const APP_VERSION = "v54";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -1462,16 +1462,72 @@ let wordsOffset = 0;   // 0 = dziś, -1 = wczoraj …
 const dayNo = (d) => Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 864e5);
 const WEEKDAYS_FULL = ["niedziela", "poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota"];
 
-function speak(text, lang) {
+// ---------- lektor ----------
+// 1) Naturalny głos OpenAI przez nasz serwer (/tts). Każde nagranie pobieramy raz i trzymamy w pamięci telefonu
+//    (Cache Storage „tablica-tts”), więc kolejne odtworzenia są natychmiastowe i działają bez internetu.
+// 2) Zapasowo: głos systemowy — wybieramy najlepszy dostępny (Premium / Enhanced / Siri / Google).
+const TTS_CACHE = "tablica-tts";
+const ttsKey = (text, lang) => location.origin + location.pathname.replace(/[^/]*$/, "") + "__tts/" + lang + "/" + encodeURIComponent(text);
+const ttsAudio = new Audio();
+let silentUrl = null;
+function silentWav() {   // ułamek sekundy ciszy — „odblokowuje” odtwarzanie na iPhonie w chwili stuknięcia
+  if (silentUrl) return silentUrl;
+  const n = 800, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf), w = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  w(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); w(8, "WAVE"); w(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 8000, true); v.setUint32(28, 16000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, "data"); v.setUint32(40, n * 2, true);
+  return (silentUrl = URL.createObjectURL(new Blob([buf], { type: "audio/wav" })));
+}
+const ttsReady = () => !!(STT_URL && store && store.auth && store.uid && window.caches);
+async function ttsBlob(text, lang, { fetchIfMissing = true } = {}) {
+  const cache = await caches.open(TTS_CACHE);
+  const hit = await cache.match(ttsKey(text, lang));
+  if (hit) return hit.blob();
+  if (!fetchIfMissing || !navigator.onLine) return null;
+  const token = await store.auth.currentUser.getIdToken();
+  const res = await fetch(STT_URL.replace(/\/+$/, "") + "/tts", {
+    method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify({ text, lang }),
+  });
+  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e.error || "HTTP " + res.status) + (e.status ? " " + e.status : "")); }
+  const blob = await res.blob();
+  await cache.put(ttsKey(text, lang), new Response(blob, { headers: { "Content-Type": "audio/mpeg" } }));
+  const keys = await cache.keys(); for (let i = 0; i < keys.length - 300; i++) await cache.delete(keys[i]);
+  return blob;
+}
+function systemSpeak(text, lang) {
   if (!("speechSynthesis" in window)) { note("To urządzenie nie potrafi czytać na głos.", true); return; }
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
   u.lang = lang; u.rate = 0.9;
-  const v = speechSynthesis.getVoices().find((x) => x.lang && x.lang.replace("_", "-").toLowerCase().startsWith(lang.slice(0, 2)) && x.lang.toLowerCase().includes(lang.slice(3).toLowerCase()))
-    || speechSynthesis.getVoices().find((x) => x.lang && x.lang.toLowerCase().startsWith(lang.slice(0, 2)));
+  const all = speechSynthesis.getVoices().filter((x) => x.lang && x.lang.replace("_", "-").toLowerCase().startsWith(lang.slice(0, 2)));
+  const score = (x) => (/premium|enhanced|ulepsz|neural|natural/i.test(x.name) ? 4 : 0) + (/siri|google/i.test(x.name) ? 2 : 0)
+    + (x.lang.replace("_", "-").toLowerCase() === lang.toLowerCase() ? 1 : 0);
+  const v = all.sort((a, b) => score(b) - score(a))[0];
   if (v) u.voice = v;
   speechSynthesis.speak(u);
 }
+async function speak(text, lang, btn) {
+  const short = lang.slice(0, 2);
+  if (!ttsReady()) { systemSpeak(text, lang); return; }
+  ttsAudio.src = silentWav(); ttsAudio.play().catch(() => {});      // w tej samej chwili co stuknięcie
+  btn && btn.classList.add("busy");
+  try {
+    const blob = await ttsBlob(text, short);
+    if (!blob) { systemSpeak(text, lang); return; }
+    if (ttsAudio.dataset.url) URL.revokeObjectURL(ttsAudio.dataset.url);
+    const url = URL.createObjectURL(blob); ttsAudio.dataset.url = url;
+    ttsAudio.src = url;
+    await ttsAudio.play();
+  } catch (e) {
+    dbg("lektor: " + (e && e.message));
+    systemSpeak(text, lang);
+  } finally { btn && btn.classList.remove("busy"); }
+}
+// nagrania dzisiejszego słówka pobieramy od razu w tle — przycisk 🔊 gra wtedy natychmiast (także offline)
+function prefetchTts(list) {
+  if (!ttsReady() || !navigator.onLine) return;
+  list.reduce((p, [text, lang]) => p.then(() => ttsBlob(text, lang).catch(() => null)), Promise.resolve());
+}
+
 const speakerSvg = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
 
 function wordCard(code, langName, ttsLang, entry) {
@@ -1484,7 +1540,7 @@ function wordCard(code, langName, ttsLang, entry) {
   const say = (text, label) => {
     const b = document.createElement("button"); b.type = "button"; b.className = "say"; b.innerHTML = speakerSvg;
     b.setAttribute("aria-label", label); b.title = label;
-    b.addEventListener("click", () => speak(text, ttsLang));
+    b.addEventListener("click", () => speak(text, ttsLang, b));
     return b;
   };
   const wrow = document.createElement("div"); wrow.className = "wc-word";
@@ -1569,6 +1625,7 @@ async function renderWords() {
   if (seq !== wordsRenderSeq) return;            // w międzyczasie przełączono dzień
   const cards = document.createElement("div"); cards.className = "wcards";
   cards.append(wordCard("es", "hiszpański", "es-ES", w.es), wordCard("en", "angielski", "en-GB", w.en));
+  if (wordsOffset === 0) prefetchTts([[w.es[0], "es"], [w.es[2], "es"], [w.en[0], "en"], [w.en[2], "en"]]);
   const nodes = [head, cards];
   if (w.source === "offline") {
     const info = document.createElement("p"); info.className = "muted words-src";

@@ -1,7 +1,7 @@
 // Service worker: aplikacja otwiera się bez internetu.
 // Pliki aplikacji: najpierw sieć (świeża wersja), przy braku sieci kopia z pamięci.
 // Biblioteki i czcionki z CDN: kopia z pamięci, odświeżana w tle.
-const VERSION = "tablica-v53";
+const VERSION = "tablica-v54";
 const SHELL = [
   "./", "index.html", "style.css", "app.js", "parser.js", "words.js", "config.js", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png",
@@ -20,7 +20,8 @@ self.addEventListener("install", (e) => {
 
 self.addEventListener("activate", (e) => {
   e.waitUntil((async () => {
-    for (const k of await caches.keys()) if (k !== VERSION) await caches.delete(k);
+    // nagrania lektora („tablica-tts”) zostają przy aktualizacjach aplikacji
+    for (const k of await caches.keys()) if (k !== VERSION && k !== "tablica-tts") await caches.delete(k);
     await self.clients.claim();
   })());
 });

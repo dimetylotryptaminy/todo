@@ -2,6 +2,7 @@
 //
 // POST /word  (JSON {avoid: {es: [...], en: [...]}}) → nowe słówko dnia wymyślone przez AI:
 //   {"es": [słowo, znaczenie po polsku, zdanie, tłumaczenie], "en": [...]}
+// POST /tts   (JSON {text, lang: "es"|"en"}) → nagranie mp3 przeczytanego tekstu (lektor OpenAI)
 // POST /      (treść = nagranie audio) → rozpoznany tekst {"text": "..."}
 //
 // Aplikacja wysyła tu nagranie (POST, treść = plik audio) z tokenem logowania Firebase w nagłówku
@@ -15,6 +16,7 @@
 //   ALLOWED_ORIGIN       (Text)    adres aplikacji, np. https://dimetylotryptaminy.github.io
 //   MODEL                (Text, opcjonalnie) domyślnie gpt-4o-mini-transcribe
 //   WORD_MODEL           (Text, opcjonalnie) model do słówek, domyślnie gpt-4o-mini
+//   TTS_MODEL, TTS_VOICE (Text, opcjonalnie) lektor, domyślnie gpt-4o-mini-tts / coral
 
 const JWKS_URL = "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com";
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -44,7 +46,13 @@ export default {
     const allowed = (env.ALLOWED_EMAILS || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
     if (!allowed.length || !allowed.includes(String(claims.email || "").toLowerCase())) return json({ error: "forbidden" }, 403);
 
-    if (new URL(req.url).pathname.replace(/\/+$/, "") === "/word") return json(await dailyWord(req, env), 200);
+    const path = new URL(req.url).pathname.replace(/\/+$/, "");
+    if (path === "/word") return json(await dailyWord(req, env), 200);
+    if (path === "/tts") {
+      const r = await speech(req, env);
+      if (r.error) return json(r, r.status && r.status < 500 ? 400 : 502);
+      return new Response(r.audio, { headers: { ...cors, "Content-Type": "audio/mpeg", "Cache-Control": "private, max-age=31536000" } });
+    }
 
     // 2) nagranie
     const type = (req.headers.get("content-type") || "audio/webm").split(";")[0].trim();
@@ -69,6 +77,26 @@ export default {
     return json({ text: String(data.text || "").trim() });
   },
 };
+
+// Lektor: naturalny głos OpenAI. Hiszpański z wymową z Hiszpanii (castellano), angielski brytyjski.
+async function speech(req, env) {
+  let body = {};
+  try { body = await req.json(); } catch {}
+  const text = String(body.text || "").trim().slice(0, 400);
+  const lang = body.lang === "en" ? "en" : "es";
+  if (!text) return { error: "empty_text", status: 400 };
+  const instructions = lang === "es"
+    ? "Habla en español de España (castellano peninsular), con pronunciación clara y natural, como un profesor nativo, a un ritmo ligeramente pausado."
+    : "Speak natural British English, clearly, like a friendly native teacher, at a slightly slow pace.";
+  const call = (payload) => fetch("https://api.openai.com/v1/audio/speech", {
+    method: "POST", headers: { Authorization: "Bearer " + env.OPENAI_API_KEY, "Content-Type": "application/json" },
+    body: JSON.stringify({ input: text, response_format: "mp3", ...payload }),
+  });
+  let r = await call({ model: env.TTS_MODEL || "gpt-4o-mini-tts", voice: env.TTS_VOICE || "coral", instructions });
+  if (!r.ok && r.status !== 401 && r.status !== 429) r = await call({ model: "tts-1-hd", voice: "nova" });   // zapasowy model bez instrukcji
+  if (!r.ok) return { error: "tts_failed", status: r.status, detail: (await r.text()).slice(0, 300) };
+  return { audio: await r.arrayBuffer() };
+}
 
 // Słówko na dziś: jedno hiszpańskie i jedno angielskie, z przykładem i tłumaczeniem, bez powtórek z listy „avoid”.
 async function dailyWord(req, env) {
