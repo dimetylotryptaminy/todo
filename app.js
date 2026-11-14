@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v71";
+const APP_VERSION = "v72";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -807,8 +807,11 @@ function renderInner() {
   renderHidden();
   const w = weekInfo();
   const wk = $("week");
-  wk.textContent = w.week + "/" + w.total;
-  const s = document.createElement("small"); s.textContent = w.range + " · " + APP_VERSION + (store.meta.local ? " · lokalnie" : store.email ? " · " + store.email : ""); wk.append(s);
+  // stopka tablicy: dzisiejsza data i numer tygodnia (zamiast samego „46/53” i zakresu dni)
+  const today = new Date();
+  const dateLine = WEEKDAYS_FULL[today.getDay()] + ", " + today.getDate() + " " + MONTHS_GEN[today.getMonth()] + " · tydzień " + w.week + "/" + w.total;
+  wk.textContent = dateLine.charAt(0).toUpperCase() + dateLine.slice(1);
+  const s = document.createElement("small"); s.textContent = APP_VERSION + (store.meta.local ? " · lokalnie" : store.email ? " · " + store.email : ""); wk.append(s);
   $("motto").textContent = store.motto;
   // pasek u góry (komputer): motto, dzisiejsza data i numer tygodnia
   const now = new Date();
@@ -817,7 +820,6 @@ function renderInner() {
   const hand = store.motto.trim() === DEFAULT_MOTTO;
   $("tiMotto").classList.toggle("hand", hand);
   if (hand) $("tiMotto").setAttribute("aria-label", store.motto); else $("tiMotto").removeAttribute("aria-label");
-  $("tiDate").textContent = WEEKDAYS_FULL[now.getDay()] + ", " + now.getDate() + " " + MONTHS_GEN[now.getMonth()] + " · tydzień " + w.week + "/" + w.total;
   if (view === "calendar") renderCalendar();
   // słówko: po zalogowaniu (albo zmianie dnia) przerysuj raz, żeby pobrać słówko z konta / od AI
   if (view === "words") { const k = (store.uid || "local") + "|" + iso(new Date()); if (k !== wordsShownFor) { wordsShownFor = k; renderWords(); } }
