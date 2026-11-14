@@ -712,7 +712,13 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none 
 .ti-motto { font-size: 22px; font-weight: 700; letter-spacing: -.005em; color: var(--ink); }
 .ti-date { font-size: 14px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 .ti-date::first-letter { text-transform: uppercase; }
-@media (max-width: 760px) { .topinfo { display: none; } }
+@media (max-width: 760px) {
+  /* telefon: odręczne motto i data nad zakładkami, wyśrodkowane */
+  .topinfo { order: -1; width: 100%; align-items: center; text-align: center; gap: 2px; padding-top: 4px; }
+  .ti-motto.hand { width: min(290px, 78vw); -webkit-mask-position: center; mask-position: center; }
+  .ti-motto:not(.hand) { font-size: 19px; }
+  .ti-date { font-size: 13px; }
+}
 @media (max-width: 640px) { .topline .tabs { flex: 1; } }
 
 /* odręczne motto (motto.png jako maska — kolor z motywu, więc działa w jasnym i ciemnym) */
