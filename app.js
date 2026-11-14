@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v62";
+const APP_VERSION = "v63";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -813,6 +813,10 @@ function renderInner() {
   // pasek u góry (komputer): motto, dzisiejsza data i numer tygodnia
   const now = new Date();
   $("tiMotto").textContent = store.motto;
+  // motto „Less noise. More mining.” jako odręczny podpis (obrazek); inne motto — zwykłym tekstem
+  const hand = store.motto.trim() === DEFAULT_MOTTO;
+  $("tiMotto").classList.toggle("hand", hand);
+  if (hand) $("tiMotto").setAttribute("aria-label", store.motto); else $("tiMotto").removeAttribute("aria-label");
   $("tiDate").textContent = WEEKDAYS_FULL[now.getDay()] + ", " + now.getDate() + " " + MONTHS_GEN[now.getMonth()] + " " + now.getFullYear() + " · tydzień " + w.week + "/" + w.total;
   if (view === "calendar") renderCalendar();
   // słówko: po zalogowaniu (albo zmianie dnia) przerysuj raz, żeby pobrać słówko z konta / od AI

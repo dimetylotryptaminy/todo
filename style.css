@@ -714,3 +714,10 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none 
 .ti-date::first-letter { text-transform: uppercase; }
 @media (max-width: 760px) { .topinfo { display: none; } }
 @media (max-width: 640px) { .topline .tabs { flex: 1; } }
+
+/* odręczne motto (motto.png jako maska — kolor z motywu, więc działa w jasnym i ciemnym) */
+.ti-motto.hand {
+  display: block; width: 320px; max-width: 100%; aspect-ratio: 8 / 1; color: transparent; font-size: 0; overflow: hidden;
+  background: var(--ink);
+  -webkit-mask: url("motto.png") right center / contain no-repeat; mask: url("motto.png") right center / contain no-repeat;
+}
