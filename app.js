@@ -1,7 +1,7 @@
 import { parse, norm, catOf } from "./parser.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v42";
+const APP_VERSION = "v43";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -599,6 +599,10 @@ $("fieldDelete").addEventListener("click", () => {
 $("addField").addEventListener("click", () => openFieldDialog(null));
 
 function render() {
+  try { renderInner(); }
+  catch (e) { console.error(e); dbg("render: " + (e && (e.stack || e.message))); note("Błąd wyświetlania: " + (e && e.message), true); }
+}
+function renderInner() {
   if (!store) return;
   const a = document.activeElement;
   if (a && a.classList && (a.classList.contains("txt") || a.id === "motto")) return; // nie przeszkadzaj w edycji
@@ -1235,7 +1239,17 @@ function evChip(ev, withDates) {
   return b;
 }
 
+// Bezpieczne rysowanie: błąd nie zostawia pustego ekranu, tylko pokazuje treść (zrzut ekranu = diagnoza).
 function renderCalendar() {
+  try { renderCalendarInner(); }
+  catch (e) {
+    console.error(e); dbg("kalendarz: " + (e && (e.stack || e.message)));
+    const p = document.createElement("pre"); p.className = "boot-err";
+    p.textContent = "Kalendarz nie narysował się (" + APP_VERSION + "):\n" + (e && (e.message || e)) + "\n" + String(e && e.stack || "").split("\n").slice(0, 4).join("\n");
+    $("calendar").replaceChildren(p);
+  }
+}
+function renderCalendarInner() {
   const root = $("calendar");
   const evs = events().filter((e) => e.start && e.end).sort((a, b) => a.start.localeCompare(b.start) || a.end.localeCompare(b.end));
   const today = todayISO();
