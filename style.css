@@ -493,3 +493,7 @@ body.view-calendar .wrap { max-width: 1480px; }
   .cal-head { justify-content: stretch; }
   .cal-add { flex: 1; }
 }
+/* „+ Dodaj wydarzenie” — niebieski przycisk z białym tekstem */
+.cal-add { background: #1f63c6; border-color: #1f63c6; color: #fff; font-weight: 600; }
+.cal-add:hover { background: #1953a8; border-color: #1953a8; }
+.cal-add:active { background: #164a95; }
