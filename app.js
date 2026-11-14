@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v58";
+const APP_VERSION = "v59";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -65,47 +65,106 @@ async function firebaseStore(config) {
   const auth = A.getAuth(app);
   // Pamięć offline prowadzimy sami (localStorage), a Firestore służy tylko do wymiany z serwerem.
   // Wbudowana pamięć Firestore (IndexedDB) na iPhonie zawodziła: zapis szedł na serwer, a ekran telefonu pokazywał stary stan.
+  const db = F.initializeFirestore(app, { localCache: F.memoryLocalCache() });
+  let unsubUser = null;
+  const key = (k) => k + "." + s.uid;
+
+  // Synchronizacja jednej kolekcji (zadania: users/{uid}/items, wspólny kalendarz: calendars/{cid}/events):
   //  • server  — ostatni stan z serwera (kopia w localStorage, więc działa też po uruchomieniu bez internetu),
   //  • pending — zmiany z tego urządzenia, jeszcze niepotwierdzone przez serwer (też w localStorage, wysyłane ponownie po starcie).
   // Ekran = server + pending, więc własne zmiany są widoczne zawsze i od razu.
-  const db = F.initializeFirestore(app, { localCache: F.memoryLocalCache() });
-  let server = {}, pending = {}, unsub = [];
-  const key = (k) => k + "." + s.uid;
-  const savePending = () => lsSet(key("pend"), pending);
+  function makeSync() {
+    const sy = { path: null, server: {}, pending: {}, unsub: null, inFlight: new Set(), k: null };
+    sy.items = () => {
+      const out = { ...sy.server };
+      for (const [id, p] of Object.entries(sy.pending)) { if (p.del) delete out[id]; else out[id] = p.data; }
+      return out;
+    };
+    sy.open = (path, keys) => { sy.close(); sy.path = path; sy.k = keys; sy.server = lsGet(keys.srv, {}); sy.pending = lsGet(keys.pend, {}); };
+    sy.close = () => { if (sy.unsub) sy.unsub(); sy.unsub = null; sy.path = null; sy.server = {}; sy.pending = {}; };
+    const save = () => lsSet(sy.k.pend, sy.pending);
+    sy.hasPending = () => Object.values(sy.pending).some((p) => !p.acked);
+    sy.subscribe = () => {
+      if (!sy.path) return;
+      if (sy.unsub) sy.unsub();
+      sy.unsub = F.onSnapshot(F.collection(db, ...sy.path), { includeMetadataChanges: true }, (snap) => {
+        if (snap.metadata.fromCache) return;          // tylko pełny stan z serwera nadpisuje kopię
+        const next = {};
+        snap.forEach((d) => { next[d.id] = d.data(); });
+        sy.server = next; lsSet(sy.k.srv, next);
+        // Potwierdzona zmiana schodzi z ekranowej nakładki dopiero, gdy stan z serwera naprawdę ją zawiera.
+        // (Na iPhonie połączenie potrafi przysłać stary stan — wtedy nakładka trzyma zmianę na ekranie.)
+        const now = Date.now();
+        for (const [id, p] of Object.entries(sy.pending)) {
+          if (!p.acked) continue;
+          const d = next[id];
+          const seen = p.del ? !d : !!d && (d.updated || 0) >= (p.data.updated || 0);
+          if (seen || now - p.acked > 10 * 60 * 1000) delete sy.pending[id];
+        }
+        save(); refreshMeta(); s.onChange();
+      }, (e) => { console.error(e); note("Błąd synchronizacji: " + (e.code || e.message), true); });
+    };
+    sy.put = (id, data) => { sy.pending[id] = { data, t: Date.now() }; save(); refreshMeta(); s.onChange(); sy.flush(); };
+    sy.del = (id) => { sy.pending[id] = { del: true, t: Date.now() }; save(); refreshMeta(); s.onChange(); sy.flush(); };
+    sy.flush = () => {
+      if (!sy.path) return;
+      for (const [id, p] of Object.entries(sy.pending)) {
+        if (p.acked || sy.inFlight.has(id + p.t)) continue;
+        sy.inFlight.add(id + p.t);
+        const ref = F.doc(db, ...sy.path, id);
+        (p.del ? F.deleteDoc(ref) : F.setDoc(ref, p.data))
+          .then(() => { if (sy.pending[id] === p) { p.acked = Date.now(); save(); refreshMeta(); s.onChange(); } })
+          .catch((e) => {
+            if (e && (e.code === "permission-denied" || e.code === "invalid-argument")) {
+              if (sy.pending[id] === p) { delete sy.pending[id]; save(); refreshMeta(); s.onChange(); }
+              writeErr(e);
+            }
+          })
+          .finally(() => sy.inFlight.delete(id + p.t));
+      }
+    };
+    return sy;
+  }
+  const tasks = makeSync();   // własne zadania (i wydarzenia, dopóki kalendarz nie jest wspólny)
+  const cal = makeSync();     // wspólny kalendarz
 
   const s = {
     motto: DEFAULT_MOTTO, meta: { pending: false, offline: false }, onChange: () => {}, uid: null, email: "",
     auth, A,
-    get items() {
-      const out = { ...server };
-      for (const [id, p] of Object.entries(pending)) { if (p.del) delete out[id]; else out[id] = p.data; }
-      return out;
-    },
+    get items() { return tasks.items(); },
+    // wydarzenia wspólnego kalendarza (null = kalendarz prywatny, wydarzenia są razem z zadaniami)
+    get calItems() { return cal.path ? cal.items() : null; },
+    calendarId: null,
     start(cb) {
       s.onChange = cb;
       A.onAuthStateChanged(auth, (user) => {
-        unsub.forEach((u) => u()); unsub = [];
+        if (unsubUser) unsubUser(); unsubUser = null;
+        tasks.close(); cal.close();
         s.uid = user ? user.uid : null; s.email = user ? user.email : "";
-        server = user ? lsGet(key("srv"), {}) : {};
-        pending = user ? lsGet(key("pend"), {}) : {};
+        if (user) tasks.open(["users", user.uid, "items"], { srv: key("srv"), pend: key("pend") });
         s.motto = (user && lsGet(key("motto"), null)) || DEFAULT_MOTTO;
         s.hidden = (user && lsGet(key("hidden"), null)) || [];
         s.fields = (user && lsGet(key("fields"), null)) || null;
+        s.calendarId = (user && lsGet(key("calid"), null)) || null;
+        if (s.calendarId) openCal(s.calendarId, false);
         showLogin(!user);
         refreshMeta(); cb();
         if (!user) return;
         subscribe();
-        flush();
+        tasks.flush(); cal.flush();
         migrateLocal(s);
+        afterLogin();
       });
       document.addEventListener("visibilitychange", () => {
         // iPhone zrywa połączenie aplikacji w tle — po powrocie łączymy się od nowa i dosyłamy zaległe zmiany.
-        if (document.visibilityState === "visible" && s.uid) { subscribe(); flush(); }
+        if (document.visibilityState === "visible" && s.uid) { subscribe(); tasks.flush(); cal.flush(); }
       });
-      window.addEventListener("online", () => { if (s.uid) { subscribe(); flush(); } });
+      window.addEventListener("online", () => { if (s.uid) { subscribe(); tasks.flush(); cal.flush(); } });
     },
-    put(id, data) { pending[id] = { data, t: Date.now() }; savePending(); refreshMeta(); s.onChange(); flush(); },
-    del(id) { pending[id] = { del: true, t: Date.now() }; savePending(); refreshMeta(); s.onChange(); flush(); },
+    put(id, data) { tasks.put(id, data); },
+    del(id) { tasks.del(id); },
+    putEvent(id, data) { (cal.path ? cal : tasks).put(id, data); },
+    delEvent(id) { (cal.path ? cal : tasks).del(id); },
     setMotto(m) {
       s.motto = m; lsSet(key("motto"), m); s.onChange();
       F.setDoc(F.doc(db, "users", s.uid), { motto: m }, { merge: true }).catch(writeErr);
@@ -133,62 +192,70 @@ async function firebaseStore(config) {
       s.fields = f; lsSet(key("fields"), f); s.onChange();
       F.setDoc(F.doc(db, "users", s.uid), { fields: f }, { merge: true }).catch(writeErr);
     },
+
+    // ---------- wspólny kalendarz ----------
+    // calendars/{cid} = {owner, members: [uid…], names: {uid: e-mail}}; wydarzenia w calendars/{cid}/events.
+    // Kto zna identyfikator (z linku z zaproszeniem), może dołączyć; czytać i zapisywać mogą tylko członkowie.
+    async createSharedCalendar() {
+      const cid = "k" + Array.from(crypto.getRandomValues(new Uint8Array(15)), (b) => b.toString(36).padStart(2, "0")).join("").slice(0, 24);
+      await F.setDoc(F.doc(db, "calendars", cid), { owner: s.uid, members: [s.uid], names: { [s.uid]: s.email || "" }, created: Date.now() });
+      await linkCalendar(cid);
+      return cid;
+    },
+    async joinCalendar(cid) {
+      await F.updateDoc(F.doc(db, "calendars", cid), { members: F.arrayUnion(s.uid), ["names." + s.uid]: s.email || "" });
+      await linkCalendar(cid);
+    },
+    async leaveCalendar() {
+      const cid = s.calendarId; if (!cid) return;
+      await F.updateDoc(F.doc(db, "calendars", cid), { members: F.arrayRemove(s.uid) });
+      await F.setDoc(F.doc(db, "users", s.uid), { calendarId: F.deleteField() }, { merge: true });
+      cal.close(); s.calendarId = null; lsSet(key("calid"), null); s.onChange();
+    },
+    async calendarInfo() {
+      if (!s.calendarId) return null;
+      const d = await F.getDoc(F.doc(db, "calendars", s.calendarId));
+      return d.exists() ? d.data() : null;
+    },
   };
 
-  function refreshMeta() { s.meta = { pending: Object.values(pending).some((p) => !p.acked), offline: !navigator.onLine }; }
-
-  function subscribe() {
-    unsub.forEach((u) => u()); unsub = [];
-    const uid = s.uid;
-    unsub.push(F.onSnapshot(F.collection(db, "users", uid, "items"), { includeMetadataChanges: true }, (snap) => {
-      if (snap.metadata.fromCache) return;          // tylko pełny stan z serwera nadpisuje kopię
-      const next = {};
-      snap.forEach((d) => { next[d.id] = d.data(); });
-      server = next; lsSet(key("srv"), server);
-      // Potwierdzona zmiana schodzi z ekranowej nakładki dopiero, gdy stan z serwera naprawdę ją zawiera.
-      // (Na iPhonie połączenie potrafi przysłać stary stan — wtedy nakładka trzyma zadanie na ekranie.)
-      const now = Date.now();
-      for (const [id, p] of Object.entries(pending)) {
-        if (!p.acked) continue;
-        const d = next[id];
-        const seen = p.del ? !d : !!d && (d.updated || 0) >= (p.data.updated || 0);
-        if (seen || now - p.acked > 10 * 60 * 1000) delete pending[id];
-      }
-      savePending(); refreshMeta(); s.onChange();
-    }, (e) => { console.error(e); note("Błąd synchronizacji: " + (e.code || e.message), true); }));
-    unsub.push(F.onSnapshot(F.doc(db, "users", uid), (d) => {
-      if (d.metadata.fromCache) return;
-      const m = (d.exists() && d.data().motto) || DEFAULT_MOTTO;
-      if (m !== s.motto) { s.motto = m; lsSet(key("motto"), m); s.onChange(); }
-      const h = d.exists() && Array.isArray(d.data().hidden) ? d.data().hidden : null;
-      if (h && JSON.stringify(h) !== JSON.stringify(s.hidden)) { s.hidden = h; lsSet(key("hidden"), h); s.onChange(); }
-      const wh = d.exists() && d.data().wordHistory;
-      if (wh) s.wordHistory = { es: Array.isArray(wh.es) ? wh.es : [], en: Array.isArray(wh.en) ? wh.en : [] };
-      const fl = d.exists() && Array.isArray(d.data().fields) && d.data().fields.length ? d.data().fields : null;
-      if (fl && JSON.stringify(fl) !== JSON.stringify(s.fields)) { s.fields = fl; lsSet(key("fields"), fl); s.onChange(); }
-    }, () => {}));
+  // przypięcie konta do wspólnego kalendarza + przeniesienie do niego dotychczasowych wydarzeń
+  async function linkCalendar(cid) {
+    await F.setDoc(F.doc(db, "users", s.uid), { calendarId: cid }, { merge: true });
+    openCal(cid, true);
+    const own = Object.entries(tasks.items()).filter(([, d]) => d && d.type === "event");
+    for (const [id, d] of own) { cal.put(id, d); tasks.del(id); }
+    s.onChange();
+  }
+  function openCal(cid, live) {
+    if (cal.path && cal.path[1] === cid) return;
+    s.calendarId = cid; lsSet(key("calid"), cid);
+    cal.open(["calendars", cid, "events"], { srv: "calsrv." + cid, pend: "calpend." + s.uid + "." + cid });
+    if (live) { cal.subscribe(); cal.flush(); }
   }
 
-  const inFlight = new Set();
-  function flush() {
-    if (!s.uid) return;
-    for (const [id, p] of Object.entries(pending)) {
-      if (p.acked || inFlight.has(id + p.t)) continue;
-      inFlight.add(id + p.t);
-      const ref = F.doc(db, "users", s.uid, "items", id);
-      (p.del ? F.deleteDoc(ref) : F.setDoc(ref, p.data))
-        .then(() => {
-          // serwer potwierdził: przenosimy zmianę do kopii serwera i zdejmujemy z kolejki (o ile w międzyczasie nie było nowszej)
-          if (pending[id] === p) { p.acked = Date.now(); savePending(); refreshMeta(); s.onChange(); }
-        })
-        .catch((e) => {
-          if (e && (e.code === "permission-denied" || e.code === "invalid-argument")) {
-            if (pending[id] === p) { delete pending[id]; savePending(); refreshMeta(); s.onChange(); }
-            writeErr(e);
-          }
-        })
-        .finally(() => inFlight.delete(id + p.t));
-    }
+  function refreshMeta() { s.meta = { pending: tasks.hasPending() || cal.hasPending(), offline: !navigator.onLine }; }
+
+  function subscribe() {
+    tasks.subscribe(); cal.subscribe();
+    if (unsubUser) unsubUser();
+    const uid = s.uid;
+    unsubUser = F.onSnapshot(F.doc(db, "users", uid), (d) => {
+      if (d.metadata.fromCache) return;
+      const data = d.exists() ? d.data() : {};
+      const m = data.motto || DEFAULT_MOTTO;
+      if (m !== s.motto) { s.motto = m; lsSet(key("motto"), m); s.onChange(); }
+      const h = Array.isArray(data.hidden) ? data.hidden : null;
+      if (h && JSON.stringify(h) !== JSON.stringify(s.hidden)) { s.hidden = h; lsSet(key("hidden"), h); s.onChange(); }
+      const wh = data.wordHistory;
+      if (wh) s.wordHistory = { es: Array.isArray(wh.es) ? wh.es : [], en: Array.isArray(wh.en) ? wh.en : [] };
+      const fl = Array.isArray(data.fields) && data.fields.length ? data.fields : null;
+      if (fl && JSON.stringify(fl) !== JSON.stringify(s.fields)) { s.fields = fl; lsSet(key("fields"), fl); s.onChange(); }
+      // wspólny kalendarz włączony / wyłączony (np. na drugim urządzeniu)
+      const cid = data.calendarId || null;
+      if (cid && cid !== s.calendarId) { openCal(cid, true); s.onChange(); }
+      else if (!cid && s.calendarId) { cal.close(); s.calendarId = null; lsSet(key("calid"), null); s.onChange(); }
+    }, () => {});
   }
 
   return s;
@@ -326,6 +393,9 @@ const strip = ({ id, ...rest }) => rest;
 let flashId = null, lastUndo = null;
 
 function write(id, data) {
+  // wydarzenia kalendarza idą do wspólnego kalendarza (jeśli jest), reszta do własnych zadań
+  const isEvent = data ? data.type === "event" : !!(store.calItems && store.calItems[id]);
+  if (isEvent && store.putEvent) { if (data === null) store.delEvent(id); else store.putEvent(id, data); return; }
   if (data === null) store.del(id); else store.put(id, data);
   if (data && data.cat && (store.hidden || []).includes(data.cat)) setTimeout(() => note(`Zapisano w zminimalizowanym polu ${fieldName(data.cat)} — przywrócisz je z granatowej belki na dole.`), 50);
 }
@@ -1211,7 +1281,7 @@ const kindOf = (ev) => (KINDS[ev.kind] ? ev.kind : "other");
 const MONTHS = ["Styczeń", "Luty", "Marzec", "Kwiecień", "Maj", "Czerwiec", "Lipiec", "Sierpień", "Wrzesień", "Październik", "Listopad", "Grudzień"];
 const MONTHS_GEN = ["stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca", "lipca", "sierpnia", "września", "października", "listopada", "grudnia"];
 const WD = ["Pn", "Wt", "Śr", "Cz", "Pt", "So", "Nd"];
-const events = () => Object.entries(store.items).filter(([, d]) => d && d.type === "event").map(([id, d]) => ({ id, ...d }));
+const events = () => Object.entries(store.calItems || store.items).filter(([, d]) => d && d.type === "event").map(([id, d]) => ({ id, ...d }));
 const pad = (n) => String(n).padStart(2, "0");
 const iso = (d) => d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
 const parseISO = (s) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
@@ -1314,7 +1384,15 @@ function renderCalendarInner() {
   const yearBox = document.createElement("div"); yearBox.className = "yearnav"; yearBox.append(prev, yr, next);
   const addBtn = document.createElement("button"); addBtn.type = "button"; addBtn.className = "btn cal-add"; addBtn.textContent = "+ Dodaj wydarzenie";
   addBtn.addEventListener("click", () => openEventDialog(null, today.startsWith(String(calYear)) ? today : calYear + "-01-01"));
-  head.append(yearBox, addBtn);
+  const shareBtn = document.createElement("button"); shareBtn.type = "button"; shareBtn.className = "share-btn";
+  shareBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 19c.6-3 2.8-5 5.5-5s4.9 2 5.5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="17" cy="9" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 14.2c2.4-.3 4.2 1.4 4.6 4.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+  shareBtn.append(store.calendarId ? "Wspólny kalendarz" : "Udostępnij");
+  if (store.calendarId) shareBtn.classList.add("on");
+  shareBtn.addEventListener("click", openShareDialog);
+  const headBtns = document.createElement("div"); headBtns.className = "cal-btns";
+  if (store.createSharedCalendar) headBtns.append(shareBtn);
+  headBtns.append(addBtn);
+  head.append(yearBox, headBtns);
 
   // legenda
   const legend = document.createElement("div"); legend.className = "legend";
@@ -1708,6 +1786,112 @@ async function renderWordHistory(box, shownDate, seq) {
       paint();
     } catch (e) { dbg("historia słówek: " + (e && (e.code || e.message))); }
   }
+}
+
+// ======================= WSPÓLNY KALENDARZ =======================
+// Jedno konto tworzy wspólny kalendarz i wysyła link (…/todo/#dolacz=ID). Druga osoba otwiera link, loguje się
+// swoim kontem i dołącza. Wspólne są tylko wydarzenia w kalendarzu — zadania każdej osoby zostają prywatne.
+const joinFromHash = () => { const m = location.hash.match(/^#dolacz=([A-Za-z0-9]{6,40})$/); return m ? m[1] : null; };
+if (joinFromHash()) {
+  try { sessionStorage.setItem("tablica.join", joinFromHash()); } catch {}
+  history.replaceState(null, "", location.pathname + location.search + "#kalendarz");
+}
+const shareLink = (cid) => location.origin + location.pathname + "#dolacz=" + cid;
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function closeShare() { $("shareDlg").hidden = true; }
+$("shareDlg").addEventListener("click", (e) => { if (e.target === $("shareDlg")) closeShare(); });
+
+async function openShareDialog() {
+  const body = $("shareBody");
+  $("shareDlg").hidden = false;
+  if (!store || !store.uid) { body.replaceChildren(el("h1", "", "Wspólny kalendarz"), el("p", "", "Zaloguj się, żeby udostępnić kalendarz.")); return; }
+  const close = el("button", "ghost", "Zamknij"); close.type = "button"; close.addEventListener("click", closeShare);
+  const err = el("p", "login-err"); err.setAttribute("aria-live", "polite");
+
+  if (!store.calendarId) {
+    const make = el("button", "btn", "Utwórz wspólny kalendarz"); make.type = "button";
+    make.addEventListener("click", async () => {
+      make.disabled = true; make.textContent = "Tworzę…";
+      try { await store.createSharedCalendar(); openShareDialog(); note("Utworzono wspólny kalendarz. Wyślij link drugiej osobie."); }
+      catch (e) { make.disabled = false; make.textContent = "Utwórz wspólny kalendarz"; err.textContent = shareErr(e); }
+    });
+    const acts = el("div", "login-actions"); acts.append(make, close);
+    body.replaceChildren(
+      el("h1", "", "Wspólny kalendarz"),
+      el("p", "", "Utwórz wspólny kalendarz i wyślij link osobie, z którą chcesz go dzielić. Będziecie widzieć i edytować te same wydarzenia. Zadania każdego z was zostają prywatne."),
+      el("p", "", "Twoje dotychczasowe wydarzenia przejdą do wspólnego kalendarza."),
+      err, acts);
+    return;
+  }
+
+  const link = shareLink(store.calendarId);
+  const linkBox = el("input", "share-link"); linkBox.readOnly = true; linkBox.value = link; linkBox.setAttribute("aria-label", "Link z zaproszeniem");
+  linkBox.addEventListener("focus", () => linkBox.select());
+  const copy = el("button", "btn", "Kopiuj link"); copy.type = "button";
+  copy.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(link); copy.textContent = "Skopiowano ✓"; }
+    catch { linkBox.focus(); linkBox.select(); copy.textContent = "Zaznaczony — skopiuj"; }
+    setTimeout(() => { copy.textContent = "Kopiuj link"; }, 2500);
+  });
+  const row = el("div", "share-row"); row.append(copy);
+  if (navigator.share) {
+    const send = el("button", "ghost", "Wyślij…"); send.type = "button";
+    send.addEventListener("click", () => navigator.share({ title: "Wspólny kalendarz", text: "Dołącz do naszego wspólnego kalendarza:", url: link }).catch(() => {}));
+    row.append(send);
+  }
+  const members = el("ul", "share-members"); members.append(el("li", "muted", "Wczytuję listę osób…"));
+  const leave = el("button", "ghost danger", "Opuść wspólny kalendarz"); leave.type = "button";
+  let armed = false;
+  leave.addEventListener("click", async () => {
+    if (!armed) { armed = true; leave.classList.add("armed"); leave.textContent = "Tak, opuść (wydarzenia zostaną u pozostałych)"; return; }
+    try { await store.leaveCalendar(); closeShare(); note("Opuszczono wspólny kalendarz."); }
+    catch (e) { err.textContent = shareErr(e); }
+  });
+  const acts = el("div", "login-actions"); acts.append(close);
+  body.replaceChildren(
+    el("h1", "", "Wspólny kalendarz"),
+    el("p", "", "Wyślij ten link osobie, która ma dołączyć (np. SMS-em lub WhatsAppem). Musi mieć własne konto w aplikacji — po otwarciu linku zaloguje się i dołączy."),
+    linkBox, row, el("span", "flabel", "Kto ma dostęp"), members, err, acts, leave);
+  try {
+    const info = await store.calendarInfo();
+    const names = (info && info.names) || {};
+    members.replaceChildren(...((info && info.members) || []).map((uid) => el("li", "", (names[uid] || "konto bez e-maila") + (uid === store.uid ? " (Ty)" : ""))));
+    if (info && info.members && info.members.length === 1) members.append(el("li", "muted", "Nikt jeszcze nie dołączył."));
+  } catch (e) { members.replaceChildren(el("li", "muted", "Nie udało się wczytać listy (" + shareErr(e) + ").")); }
+}
+function shareErr(e) {
+  const c = e && e.code;
+  if (c === "permission-denied") return "Brak uprawnień — sprawdź, czy w Firebase są nowe reguły bazy (Firestore → Rules).";
+  if (c === "not-found") return "Ten wspólny kalendarz nie istnieje.";
+  if (c === "unavailable") return "Brak połączenia z internetem.";
+  return (e && (e.message || c)) || "nieznany błąd";
+}
+
+// po zalogowaniu: jeśli otwarto link z zaproszeniem — zapytaj o dołączenie
+function afterLogin() {
+  let cid = null; try { cid = sessionStorage.getItem("tablica.join"); } catch {}
+  if (!cid || !store || !store.uid) return;
+  try { sessionStorage.removeItem("tablica.join"); } catch {}
+  if (store.calendarId === cid) { note("Ten wspólny kalendarz jest już podłączony."); return; }
+  const body = $("shareBody");
+  const yes = el("button", "btn", "Dołącz"); yes.type = "button";
+  const no = el("button", "ghost", "Nie teraz"); no.type = "button"; no.addEventListener("click", closeShare);
+  const err = el("p", "login-err");
+  yes.addEventListener("click", async () => {
+    yes.disabled = true; yes.textContent = "Dołączam…";
+    try {
+      if (store.calendarId) await store.leaveCalendar();
+      await store.joinCalendar(cid); closeShare(); setView("calendar");
+      note("Dołączono do wspólnego kalendarza.");
+    } catch (e) { yes.disabled = false; yes.textContent = "Dołącz"; err.textContent = e && e.code === "permission-denied" ? "Nie udało się dołączyć — link jest nieprawidłowy albo w Firebase brakuje nowych reguł bazy." : shareErr(e); }
+  });
+  const acts = el("div", "login-actions"); acts.append(yes, no);
+  body.replaceChildren(
+    el("h1", "", "Dołączyć do wspólnego kalendarza?"),
+    el("p", "", "Otrzymałeś zaproszenie do wspólnego kalendarza. Po dołączeniu będziecie widzieć i edytować te same wydarzenia. Twoje zadania zostaną prywatne."),
+    el("p", "", store.calendarId ? "Uwaga: opuścisz obecny wspólny kalendarz." : "Twoje dotychczasowe wydarzenia przejdą do wspólnego kalendarza."),
+    err, acts);
+  $("shareDlg").hidden = false;
 }
 
 // ---------- zakładki ZADANIA / KALENDARZ / SŁÓWKO NA DZIŚ ----------

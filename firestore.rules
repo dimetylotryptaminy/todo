@@ -1,11 +1,29 @@
 rules_version = '2';
-// Każdy użytkownik widzi i zmienia tylko własne zadania.
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // Prywatne dane każdej osoby: zadania, pola, słówka, ustawienia.
     match /users/{uid} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
       match /{document=**} {
         allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+    }
+
+    // Wspólne kalendarze: czytać i zapisywać mogą tylko członkowie.
+    // Kto zna identyfikator (link z zaproszeniem), może dopisać do członków wyłącznie siebie.
+    match /calendars/{cid} {
+      allow read: if request.auth != null && request.auth.uid in resource.data.members;
+      allow create: if request.auth != null
+        && request.resource.data.owner == request.auth.uid
+        && request.resource.data.members == [request.auth.uid];
+      allow update: if request.auth != null && (
+        request.auth.uid in resource.data.members
+        || (request.resource.data.members == resource.data.members.concat([request.auth.uid])
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'names'])));
+      match /events/{eid} {
+        allow read, write: if request.auth != null
+          && request.auth.uid in get(/databases/$(database)/documents/calendars/$(cid)).data.members;
       }
     }
   }
