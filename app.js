@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v77";
+const APP_VERSION = "v78";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -1237,11 +1237,86 @@ function cloudSetTarget(cat) {
 }
 function cloudBtnOff(btn) { btn.classList.remove("on"); }
 
+// ---- okno nagrywania na środku ekranu: duży mikrofon reagujący na głos, słowa na żywo, Gotowe/Anuluj ----
+const vo = { el: null, closeT: null, tok: null };
+const MIC_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>';
+function voBuild() {
+  if (vo.el) return vo.el;
+  const el = document.createElement("div");
+  el.id = "vo"; el.className = "vo"; el.hidden = true;
+  el.innerHTML = `<div class="vo-card" role="dialog" aria-modal="true" aria-labelledby="voTitle">
+      <div class="vo-title" id="voTitle"></div>
+      <div class="vo-mic"><span class="vo-ring"></span><span class="vo-ring2"></span><span class="vo-icon">${MIC_SVG}</span><span class="vo-spin"></span></div>
+      <div class="vo-hint" aria-live="polite"></div>
+      <div class="vo-text" aria-live="polite"></div>
+      <div class="vo-btns"><button type="button" class="vo-cancel">Anuluj</button><button type="button" class="vo-done">Gotowe</button></div>
+    </div>`;
+  document.body.append(el);
+  el.querySelector(".vo-cancel").onclick = voCancel;
+  el.querySelector(".vo-done").onclick = () => { const r = cloud.rec; if (r) { r.spoke = true; cloudStop("send"); } else voClose(); };
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !el.hidden) voCancel(); });
+  return vo.el = el;
+}
+function voTitle(cat) {
+  const el = voBuild(), f = cat && fieldList().find((x) => x.id === cat);
+  el.className = "vo" + (f ? " hc-" + fieldColor(f) : "");
+  el.querySelector(".vo-title").innerHTML = "";
+  const t = el.querySelector(".vo-title");
+  if (cat) { t.append("Nagrywam do "); const b = document.createElement("b"); b.textContent = fieldName(cat); t.append(b); }
+  else t.textContent = "Nagrywam polecenie";
+}
+function voState(st, hint) {
+  const el = voBuild();
+  el.classList.remove("st-listen", "st-work", "st-done", "st-error"); el.classList.add("st-" + st);
+  el.querySelector(".vo-hint").textContent = hint || "";
+  const t0 = el.querySelector(".vo-title").firstChild;
+  if (t0 && t0.nodeType === 3) t0.textContent = t0.textContent.replace(/^(Nagrywam|Zadanie)/, st === "listen" ? "Nagrywam" : "Zadanie")
+                                                           .replace(/^(Nagrywam|Zadanie) polecenie/, st === "listen" ? "Nagrywam polecenie" : "Polecenie");
+  el.querySelector(".vo-done").hidden = st !== "listen";
+  el.querySelector(".vo-cancel").textContent = st === "done" || st === "error" ? "Zamknij" : "Anuluj";
+}
+function voText(t, interim) {
+  const x = voBuild().querySelector(".vo-text");
+  x.textContent = t || ""; x.classList.toggle("interim", !!interim);
+}
+function voLevel(v) { if (vo.el) vo.el.style.setProperty("--lvl", v.toFixed(2)); }
+function voOpen(cat) {
+  clearTimeout(vo.closeT); vo.tok = { cancelled: false };
+  voTitle(cat); voText(""); voLevel(0);
+  voState("listen", "Mów… zapiszę, gdy skończysz mówić.");
+  vo.el.hidden = false;
+  vo.el.querySelector(".vo-done").focus({ preventScroll: true });
+  return vo.tok;
+}
+function voClose(delay = 0) {
+  clearTimeout(vo.closeT);
+  vo.closeT = setTimeout(() => { if (vo.el) vo.el.hidden = true; }, delay);
+}
+function voError(msg) { if (!vo.el || vo.el.hidden) return; voState("error", msg); voClose(3500); }
+function voCancel() {
+  if (vo.tok) vo.tok.cancelled = true;
+  if (cloud.rec) cloudStop("cancel");
+  voClose(); note("Anulowano nagrywanie.");
+}
+
+async function sttFetch(blob) {
+  const token = await store.auth.currentUser.getIdToken();
+  const res = await fetch(STT_URL, { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": blob.type || "audio/mp4" }, body: blob });
+  return { res, data: await res.json().catch(() => ({})) };
+}
+// wynik serwera → czysty tekst (bez podpowiedzi oddanej przy ciszy i bez słowa kończącego)
+function cleanStt(text) {
+  text = String(text || "").trim();
+  if (/lista zadań\.?\s*(spółki|pola)|spółki:\s*biotts,\s*nestmedic/i.test(text)) text = "";
+  const cut = trailingEndWord(text); if (cut >= 0) text = text.slice(0, cut);
+  return text.replace(/^[\s:,\-–—]+|[\s,.;:!?\-–—]+$/g, "");
+}
+
 async function cloudToggle(btn, cat) {
   const r = cloud.rec;
   if (r && r.btn === btn) { r.spoke = true; cloudStop("send"); return; }   // ten sam mikrofon = koniec nagrania (wysyłamy zawsze)
   if (r) {                                                         // inny mikrofon w trakcie = zmiana pola
-    cloudBtnOff(r.btn); r.btn = btn; r.cat = cat; btn.classList.add("on"); cloudSetTarget(cat);
+    cloudBtnOff(r.btn); r.btn = btn; r.cat = cat; btn.classList.add("on"); cloudSetTarget(cat); voTitle(cat); voState("listen", "Mów… zapiszę, gdy skończysz mówić.");
     note(cat ? `Nagrywam do ${fieldName(cat)}…` : "Nagrywam polecenie…"); return;
   }
   if (!navigator.onLine) { note("Brak internetu — rozpoznawanie mowy wymaga połączenia. Wpisz zadanie ręcznie.", true); return; }
@@ -1251,6 +1326,7 @@ async function cloudToggle(btn, cat) {
   const ctx = AC ? new AC() : null;
   if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {});
   const rec = cloud.rec = { btn, cat, ctx, stopped: false, spoke: false };
+  rec.tok = voOpen(cat);
   btn.classList.add("on"); cloudSetTarget(cat);
   note(cat ? `Mów zadanie do ${fieldName(cat)}. Zapisze się, gdy skończysz mówić.` : "Mów polecenie, np. „dodaj Genomtec wysłać umowę”.");
 
@@ -1258,9 +1334,10 @@ async function cloudToggle(btn, cat) {
     rec.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
   } catch (e) {
     cloud.rec = null; cloudBtnOff(btn); cloudSetTarget(null); if (ctx) ctx.close().catch(() => {});
-    note(e && e.name === "NotAllowedError"
+    const msg = e && e.name === "NotAllowedError"
       ? (IOS ? "Brak zgody na mikrofon. Ustawienia → Aplikacje → Safari → Mikrofon → Pozwól." : "Brak zgody na mikrofon. Kliknij ikonę w pasku adresu → Mikrofon → Zezwalaj.")
-      : "Nie udało się włączyć mikrofonu.", true);
+      : "Nie udało się włączyć mikrofonu.";
+    note(msg, true); voError(msg);
     return;
   }
   if (rec.stopped) { rec.stream.getTracks().forEach((t) => t.stop()); return; }   // wyłączony, zanim ruszył
@@ -1273,11 +1350,21 @@ async function cloudToggle(btn, cat) {
     rec.stream.getTracks().forEach((t) => t.stop());
     if (rec.ctx) rec.ctx.close().catch(() => {});
     if (rec.mode !== "send") return;
-    if (!rec.spoke) { note("Nic nie usłyszałem. Stuknij mikrofon i mów trochę głośniej.", true); return; }
-    const blob = new Blob(chunks, { type: (mr.mimeType || mime || "audio/mp4").split(";")[0] });
-    transcribe(blob, rec.cat, rec.btn);
+    if (!rec.spoke) { const m = "Nic nie usłyszałem. Stuknij mikrofon i mów trochę głośniej."; note(m, true); voError(m); return; }
+    transcribe(audioBlob(), rec.cat, rec.btn, rec.tok);
   };
+  const audioBlob = () => new Blob(chunks, { type: (mr.mimeType || mime || "audio/mp4").split(";")[0] });
   mr.start(250);
+
+  // Słowa na żywo: co ~2 s, gdy mówisz, wysyłamy dotychczasowe nagranie i pokazujemy, co serwer już rozpoznał.
+  let lastInterim = Date.now() - 800, sentChunks = 0;   // pierwszy podgląd po ~1,2 s nagrania
+  rec.interim = () => {
+    if (!rec.spoke || rec.inflight || rec.stopped || Date.now() - lastInterim < 2000 || chunks.length <= sentChunks) return;
+    lastInterim = Date.now(); sentChunks = chunks.length; rec.inflight = true;
+    sttFetch(audioBlob()).then(({ res, data }) => {
+      if (res.ok && !rec.stopped) { const t = cleanStt(data.text); if (t) voText(t, true); }
+    }).catch(() => {}).finally(() => { rec.inflight = false; });
+  };
   dbg("nagrywanie " + (mr.mimeType || mime || "?"));
 
   // Wykrywanie ciszy: po wypowiedzi 1,5 s ciszy kończy nagranie. Bez mowy przez 8 s — rezygnuje.
@@ -1288,16 +1375,19 @@ async function cloudToggle(btn, cat) {
     const an = ctx.createAnalyser(); an.fftSize = 1024; src.connect(an);
     const buf = new Float32Array(an.fftSize);
     rec.timer = setInterval(() => {
+      if (ctx.state === "suspended") ctx.resume().catch(() => {});
       an.getFloatTimeDomainData(buf);
       let sum = 0; for (const v of buf) sum += v * v;
       const rms = Math.sqrt(sum / buf.length);
       frames++;
+      voLevel(Math.min(1, rms / Math.max(0.03, floor * 12)));
       // poziom tła = najcichszy moment (powoli dopuszczamy wzrost), więc mowa od pierwszej sekundy nie zawyży tła
       floor = rms < floor ? rms : floor * 1.002;
       if (frames <= 3) return;
       const thr = Math.max(0.012, floor * 3);
       if (rms > thr) { loud++; quietSince = 0; if (loud >= 2) rec.spoke = true; }
       else { loud = 0; if (rec.spoke && !quietSince) quietSince = Date.now(); }
+      if (rec.spoke) rec.interim();
       if (rec.spoke && quietSince && Date.now() - quietSince > 1500) cloudStop("send");
       else if (!rec.spoke && Date.now() - started > 8000) cloudStop("send");
       else if (Date.now() - started > 45000) cloudStop("send");
@@ -1317,40 +1407,38 @@ function cloudStop(mode) {
   else if (rec.stream) rec.stream.getTracks().forEach((t) => t.stop());
 }
 
-async function transcribe(blob, cat, btn) {
+async function transcribe(blob, cat, btn, tok = { cancelled: false }) {
   btn.classList.add("busy");
-  note("Rozpoznaję…");
+  note("Rozpoznaję…"); voLevel(0); voState("work", "Rozpoznaję…");
+  const fail = (m) => { note(m, true); voError(m); };
   try {
-    const token = await store.auth.currentUser.getIdToken();
-    const res = await fetch(STT_URL, { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": blob.type || "audio/mp4" }, body: blob });
-    const data = await res.json().catch(() => ({}));
+    const { res, data } = await sttFetch(blob);
+    if (tok.cancelled) return;
     if (!res.ok) {
       dbg("stt " + res.status + " " + (data.error || "") + " " + (data.detail || ""));
-      note({ 401: "Serwer mowy nie rozpoznał logowania. Wyloguj się i zaloguj ponownie.",
+      fail({ 401: "Serwer mowy nie rozpoznał logowania. Wyloguj się i zaloguj ponownie.",
              403: "Ten e-mail nie ma dostępu do rozpoznawania mowy (ALLOWED_EMAILS w Cloudflare).",
              502: "Usługa rozpoznawania mowy odmówiła (sprawdź klucz i środki na koncie OpenAI)." }[res.status]
-           || "Nie udało się rozpoznać mowy (błąd " + res.status + ").", true);
+           || "Nie udało się rozpoznać mowy (błąd " + res.status + ").");
       return;
     }
-    let text = String(data.text || "").trim();
-    // przy ciszy/szumie rozpoznawanie potrafi „oddać” tekst podpowiedzi zamiast mowy — takie wyniki pomijamy
-    if (/lista zadań\.?\s*(spółki|pola)|spółki:\s*biotts,\s*nestmedic/i.test(text)) text = "";
-    dbg("stt: " + text);
-    const cut = trailingEndWord(text); if (cut >= 0) text = text.slice(0, cut);
-    text = text.replace(/^[\s:,\-–—]+|[\s,.;:!?\-–—]+$/g, "");
-    if (!text) { note("Nic nie rozpoznałem. Spróbuj jeszcze raz.", true); return; }
+    dbg("stt: " + data.text);
+    const text = cleanStt(data.text);
+    if (!text) { fail("Nic nie rozpoznałem. Spróbuj jeszcze raz."); return; }
     if (cat) {
       const t = text.charAt(0).toUpperCase() + text.slice(1);
       const id = newId(); flashId = id;
       write(id, { type: "todo", cat, text: t, done: false, created: Date.now(), updated: Date.now() });
       lastUndo = [[id, null]];
       note(`Dodano do ${fieldName(cat)}: ${t}`, false, true);
+      voText(t); voState("done", "✓ Dodano do " + fieldName(cat)); voClose(1600);
     } else {
+      voText(text); voState("done", "✓ Polecenie"); voClose(1200);
       $("cmd").value = text; run(text);
     }
   } catch (e) {
     dbg("stt wyjątek " + (e && e.message));
-    note(navigator.onLine ? "Nie udało się połączyć z serwerem mowy." : "Brak internetu — rozpoznawanie mowy wymaga połączenia.", true);
+    if (!tok.cancelled) fail(navigator.onLine ? "Nie udało się połączyć z serwerem mowy." : "Brak internetu — rozpoznawanie mowy wymaga połączenia.");
   } finally { btn.classList.remove("busy"); }
 }
 

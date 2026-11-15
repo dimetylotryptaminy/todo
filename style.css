@@ -774,3 +774,38 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none 
   background: var(--ink); -webkit-mask: url("motto.png") right center / contain no-repeat; mask: url("motto.png") right center / contain no-repeat;
 }
 .motto.hand:focus { outline-offset: 4px; }
+
+/* ---- okno nagrywania (mikrofon na środku ekranu) ---- */
+.vo { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 16px;
+  background: rgba(15, 20, 30, .45); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); --lvl: 0; }
+.vo[hidden] { display: none; }
+.vo-card { width: min(420px, 100%); background: var(--paper); color: var(--ink); border-radius: 22px;
+  padding: 22px 20px 16px; box-shadow: 0 20px 60px rgba(0,0,0,.35); text-align: center; animation: voIn .18s ease-out; }
+@keyframes voIn { from { transform: translateY(12px) scale(.97); opacity: 0; } }
+.vo-title { font-size: 15px; color: var(--ink-soft); }
+.vo-title b { color: var(--hd, var(--navy)); letter-spacing: .03em; }
+.vo-mic { position: relative; width: 112px; height: 112px; margin: 22px auto 14px; display: grid; place-items: center; }
+.vo-icon { position: relative; z-index: 2; width: 84px; height: 84px; border-radius: 50%; background: var(--hd, var(--navy)); color: #fff;
+  display: grid; place-items: center; box-shadow: 0 6px 18px rgba(0,0,0,.25); transition: background .2s; }
+.vo-icon svg { width: 40px; height: 40px; }
+.vo-ring, .vo-ring2 { position: absolute; inset: 14px; border-radius: 50%; background: var(--hd, var(--navy)); opacity: .18; z-index: 1;
+  transform: scale(calc(1 + var(--lvl) * .55)); transition: transform .1s linear; }
+.vo-ring2 { opacity: .12; animation: voPulse 1.6s ease-out infinite; }
+@keyframes voPulse { from { transform: scale(1); opacity: .28; } to { transform: scale(1.6); opacity: 0; } }
+.vo-spin { position: absolute; inset: 6px; border-radius: 50%; border: 3px solid transparent; border-top-color: var(--hd, var(--navy)); z-index: 3; display: none; animation: voSpin .8s linear infinite; }
+@keyframes voSpin { to { transform: rotate(360deg); } }
+.vo.st-work .vo-spin { display: block; }
+.vo.st-work .vo-ring2, .vo.st-done .vo-ring2, .vo.st-error .vo-ring2 { animation: none; opacity: 0; }
+.vo.st-done .vo-icon { background: #1f8a4c; }
+.vo.st-error .vo-icon { background: var(--warn); }
+.vo-hint { font-size: 15px; font-weight: 600; min-height: 20px; }
+.vo.st-error .vo-hint { color: var(--warn); }
+.vo-text { margin: 12px 0 4px; min-height: 52px; max-height: 30vh; overflow-y: auto; font-size: 20px; line-height: 1.35; color: var(--ink); overflow-wrap: anywhere; }
+.vo-text.interim { color: var(--ink-soft); }
+.vo-text:empty::before { content: "…"; color: var(--done); }
+.vo-btns { display: flex; gap: 10px; margin-top: 14px; }
+.vo-btns button { flex: 1; min-height: 46px; border-radius: 999px; font: inherit; font-size: 16px; font-weight: 600; cursor: pointer;
+  border: 1px solid var(--hair); background: transparent; color: var(--ink); }
+.vo-btns .vo-done { background: var(--hd, var(--navy)); border-color: transparent; color: #fff; }
+.vo-btns button[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) { .vo-card, .vo-ring2, .vo-spin { animation: none; } .vo-ring { transition: none; } }
