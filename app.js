@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v78";
+const APP_VERSION = "v79";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -1249,7 +1249,7 @@ function voBuild() {
       <div class="vo-mic"><span class="vo-ring"></span><span class="vo-ring2"></span><span class="vo-icon">${MIC_SVG}</span><span class="vo-spin"></span></div>
       <div class="vo-hint" aria-live="polite"></div>
       <div class="vo-text" aria-live="polite"></div>
-      <div class="vo-btns"><button type="button" class="vo-cancel">Anuluj</button><button type="button" class="vo-done">Gotowe</button></div>
+      <div class="vo-btns"><button type="button" class="vo-cancel">Anuluj</button><button type="button" class="vo-done">Zapisz</button></div>
     </div>`;
   document.body.append(el);
   el.querySelector(".vo-cancel").onclick = voCancel;
@@ -1283,7 +1283,7 @@ function voLevel(v) { if (vo.el) vo.el.style.setProperty("--lvl", v.toFixed(2));
 function voOpen(cat) {
   clearTimeout(vo.closeT); vo.tok = { cancelled: false };
   voTitle(cat); voText(""); voLevel(0);
-  voState("listen", "Mów… zapiszę, gdy skończysz mówić.");
+  voState("listen", "Mów… na końcu powiedz „zapisz”.");
   vo.el.hidden = false;
   vo.el.querySelector(".vo-done").focus({ preventScroll: true });
   return vo.tok;
@@ -1316,7 +1316,7 @@ async function cloudToggle(btn, cat) {
   const r = cloud.rec;
   if (r && r.btn === btn) { r.spoke = true; cloudStop("send"); return; }   // ten sam mikrofon = koniec nagrania (wysyłamy zawsze)
   if (r) {                                                         // inny mikrofon w trakcie = zmiana pola
-    cloudBtnOff(r.btn); r.btn = btn; r.cat = cat; btn.classList.add("on"); cloudSetTarget(cat); voTitle(cat); voState("listen", "Mów… zapiszę, gdy skończysz mówić.");
+    cloudBtnOff(r.btn); r.btn = btn; r.cat = cat; btn.classList.add("on"); cloudSetTarget(cat); voTitle(cat); voState("listen", "Mów… na końcu powiedz „zapisz”.");
     note(cat ? `Nagrywam do ${fieldName(cat)}…` : "Nagrywam polecenie…"); return;
   }
   if (!navigator.onLine) { note("Brak internetu — rozpoznawanie mowy wymaga połączenia. Wpisz zadanie ręcznie.", true); return; }
@@ -1362,7 +1362,9 @@ async function cloudToggle(btn, cat) {
     if (!rec.spoke || rec.inflight || rec.stopped || Date.now() - lastInterim < 2000 || chunks.length <= sentChunks) return;
     lastInterim = Date.now(); sentChunks = chunks.length; rec.inflight = true;
     sttFetch(audioBlob()).then(({ res, data }) => {
-      if (res.ok && !rec.stopped) { const t = cleanStt(data.text); if (t) voText(t, true); }
+      if (!res.ok || rec.stopped) return;
+      const t = cleanStt(data.text); if (t) voText(t, true);
+      if (trailingEndWord(String(data.text || "").trim()) >= 0 && cloud.rec === rec) cloudStop("send");   // powiedziałeś „zapisz” — kończymy od razu
     }).catch(() => {}).finally(() => { rec.inflight = false; });
   };
   dbg("nagrywanie " + (mr.mimeType || mime || "?"));
