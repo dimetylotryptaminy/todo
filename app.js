@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v82";
+const APP_VERSION = "v83";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -2366,12 +2366,10 @@ function noteItem(n, onClick, showFolder = false) {
   const b = document.createElement("button"); b.type = "button"; b.className = "note-item" + (n.id === notesUI.sel ? " sel" : "");
   b.setAttribute("aria-current", n.id === notesUI.sel ? "true" : "false");
   const t = document.createElement("span"); t.className = "ni-t"; t.textContent = noteTitle(n);
-  const body = (n.body || "").trim(); const firstIsTitle = !(n.title || "").trim();
-  const prev = (firstIsTitle ? body.split("\n").slice(1).join(" ") : body).replace(/\s+/g, " ").slice(0, 120);
-  const m = document.createElement("span"); m.className = "ni-m";
-  const dt = document.createElement("span"); dt.className = "ni-d"; dt.textContent = (showFolder ? folderName(folderOf(n)) + " · " : "") + fmtNoteDate(n.updated);
-  m.append(dt, prev ? " · " + prev : "");
-  b.append(t, m); b.onclick = onClick;
+  b.append(t);
+  // na liście same tytuły; w wynikach wyszukiwania pod tytułem tylko nazwa zagadnienia
+  if (showFolder) { const m = document.createElement("span"); m.className = "ni-m"; m.textContent = folderName(folderOf(n)); b.append(m); }
+  b.onclick = onClick;
   li.append(b); return li;
 }
 
