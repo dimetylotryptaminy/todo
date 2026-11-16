@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v81";
+const APP_VERSION = "v82";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -2220,7 +2220,7 @@ const notesAll = () => Object.entries(store.items).filter(([, d]) => d && d.type
 const nFolders = () => Object.entries(store.items).filter(([, d]) => d && d.type === "nfolder").map(([id, d]) => ({ id, ...d }))
   .sort((a, b) => (a.name || "").localeCompare(b.name || "", "pl", { sensitivity: "base" }));
 const folderOf = (n) => (n.folder && store.items[n.folder] && store.items[n.folder].type === "nfolder" ? n.folder : NOFOLDER);
-const folderName = (fid) => (fid === NOFOLDER ? "Bez katalogu" : ((store.items[fid] || {}).name || "Katalog"));
+const folderName = (fid) => (fid === NOFOLDER ? "Bez zagadnienia" : ((store.items[fid] || {}).name || "Zagadnienie"));
 const noteTitle = (n) => (n.title || "").trim() || ((n.body || "").trim().split("\n")[0] || "").slice(0, 80) || "Nowa notatka";
 const plNotes = (k) => k + " " + (k === 1 ? "notatka" : (k % 10 >= 2 && k % 10 <= 4 && (k % 100 < 12 || k % 100 > 14)) ? "notatki" : "notatek");
 const notesUI = { folder: lsGet("noteFolder", null), sel: lsGet("noteSel", null), q: "", editing: false, built: null, list: null, ed: null, edFor: null, saveT: null };
@@ -2283,7 +2283,7 @@ function notesDelete(id) {
   renderNotes();
 }
 function folderNew() {
-  const name = (prompt("Nazwa nowego katalogu (np. Soto, Praca, Przepisy):") || "").trim();
+  const name = (prompt("Nazwa nowego zagadnienia (np. Soto, Praca, Przepisy):") || "").trim();
   if (!name) return;
   const id = newId(), now = Date.now();
   write(id, { type: "nfolder", name, created: now, updated: now });
@@ -2291,18 +2291,18 @@ function folderNew() {
 }
 function folderRename(fid) {
   const f = store.items[fid]; if (!f) return;
-  const name = (prompt("Nowa nazwa katalogu:", f.name || "") || "").trim();
+  const name = (prompt("Nowa nazwa zagadnienia:", f.name || "") || "").trim();
   if (!name || name === f.name) return;
   write(fid, { ...f, name, updated: Date.now() }); notesUI.built = null; renderNotes();
 }
 function folderDelete(fid) {
   const f = store.items[fid]; if (!f) return;
   const inside = notesAll().filter((n) => folderOf(n) === fid);
-  if (!confirm(inside.length ? `Usunąć katalog „${f.name}” razem z ${plNotes(inside.length).replace(/notatka$/, "notatką").replace(/notatki$/, "notatkami").replace(/notatek$/, "notatkami")}?` : `Usunąć pusty katalog „${f.name}”?`)) return;
+  if (!confirm(inside.length ? `Usunąć zagadnienie „${f.name}” razem z ${plNotes(inside.length).replace(/notatka$/, "notatką").replace(/notatki$/, "notatkami").replace(/notatek$/, "notatkami")}?` : `Usunąć puste zagadnienie „${f.name}”?`)) return;
   lastUndo = [[fid, f], ...inside.map((n) => [n.id, strip(n)])];
   for (const n of inside) write(n.id, null);
   write(fid, null);
-  note(`Usunięto katalog „${f.name}”.`, false, true);
+  note(`Usunięto zagadnienie „${f.name}”.`, false, true);
   notesOpenFolder(null);
 }
 
@@ -2323,7 +2323,7 @@ function renderNotes() {
 // --- poziom 1: katalogi ---
 function buildRootView(root) {
   root.innerHTML = `<div class="nf-root">
-      <div class="notes-head"><h2>Notatki</h2><button type="button" class="btn cal-add nf-new">+ Nowy katalog</button></div>
+      <div class="notes-head"><h2>Notatki</h2><button type="button" class="btn cal-add nf-new">+ Nowe zagadnienie</button></div>
       <input type="search" class="notes-q" placeholder="Szukaj we wszystkich notatkach" aria-label="Szukaj we wszystkich notatkach">
       <div class="nf-body"></div>
     </div>`;
@@ -2341,11 +2341,11 @@ function renderRoot() {
     if (!hits.length) { const li = document.createElement("li"); li.className = "notes-empty muted"; li.textContent = "Brak notatek pasujących do „" + notesUI.q.trim() + "”."; ul.append(li); }
     body.replaceChildren(ul); return;
   }
-  const tiles = nFolders().map((f) => ({ id: f.id, name: f.name || "Katalog" }));
-  if (all.some((n) => folderOf(n) === NOFOLDER)) tiles.push({ id: NOFOLDER, name: "Bez katalogu", muted: true });
+  const tiles = nFolders().map((f) => ({ id: f.id, name: f.name || "Zagadnienie" }));
+  if (all.some((n) => folderOf(n) === NOFOLDER)) tiles.push({ id: NOFOLDER, name: "Bez zagadnienia", muted: true });
   if (!tiles.length) {
     const p = document.createElement("p"); p.className = "notes-empty muted";
-    p.textContent = "Nie masz jeszcze katalogów. Utwórz pierwszy, np. „Soto”, „Praca” albo „Przepisy”, a w nim notatki.";
+    p.textContent = "Nie masz jeszcze zagadnień. Utwórz pierwsze, np. „Soto”, „Praca” albo „Przepisy”, a w nim notatki.";
     body.replaceChildren(p); return;
   }
   const grid = document.createElement("div"); grid.className = "nf-grid";
@@ -2355,7 +2355,7 @@ function renderRoot() {
     const ic = document.createElement("span"); ic.className = "nf-ic"; ic.innerHTML = FOLDER_SVG;
     const t = document.createElement("span"); t.className = "nf-name"; t.textContent = f.name;
     const m = document.createElement("span"); m.className = "nf-meta";
-    m.textContent = inside.length ? plNotes(inside.length) + " · " + fmtNoteDate(inside[0].updated) : "pusty";
+    m.textContent = inside.length ? plNotes(inside.length) + " · " + fmtNoteDate(inside[0].updated) : "puste";
     b.append(ic, t, m); b.onclick = () => notesOpenFolder(f.id);
     return b;
   }));
@@ -2379,14 +2379,14 @@ function noteItem(n, onClick, showFolder = false) {
 function buildFolderView(root) {
   const fid = notesUI.folder, real = fid !== NOFOLDER;
   root.innerHTML = `<div class="nf-crumb">
-        <button type="button" class="yearbtn nf-up" aria-label="Wróć do katalogów">‹</button>
+        <button type="button" class="yearbtn nf-up" aria-label="Wróć do zagadnień">‹</button>
         <span class="nf-ic">${FOLDER_SVG}</span><h2 class="nf-title"></h2>
-        ${real ? '<button type="button" class="ghost nf-ren">Zmień nazwę</button><button type="button" class="ghost nf-del">Usuń katalog</button>' : ""}
+        ${real ? '<button type="button" class="ghost nf-ren">Zmień nazwę</button><button type="button" class="ghost nf-del">Usuń zagadnienie</button>' : ""}
       </div>
       <div class="notes-wrap">
         <aside class="notes-side">
           <button type="button" class="btn cal-add notes-new">+ Nowa notatka</button>
-          <input type="search" class="notes-q" placeholder="Szukaj w tym katalogu" aria-label="Szukaj w tym katalogu">
+          <input type="search" class="notes-q" placeholder="Szukaj w tym zagadnieniu" aria-label="Szukaj w tym zagadnieniu">
           <ul class="notes-list" aria-label="Lista notatek"></ul>
         </aside>
         <div class="notes-ed"></div>
@@ -2407,7 +2407,7 @@ function renderFolderNotes() {
   const items = shown.map((n) => noteItem(n, () => notesSelect(n.id, false)));
   if (!items.length) {
     const li = document.createElement("li"); li.className = "notes-empty muted";
-    li.textContent = q ? "Brak notatek pasujących do „" + notesUI.q.trim() + "”." : "Ten katalog jest pusty. Kliknij „+ Nowa notatka”.";
+    li.textContent = q ? "Brak notatek pasujących do „" + notesUI.q.trim() + "”." : "To zagadnienie jest puste. Kliknij „+ Nowa notatka”.";
     items.push(li);
   }
   notesUI.list.replaceChildren(...items);
@@ -2441,16 +2441,16 @@ function renderFolderNotes() {
   // data zmiany + przeniesienie do innego katalogu
   const meta = document.createElement("div"); meta.className = "note-date muted";
   const when = document.createElement("span"); when.className = "note-when"; when.textContent = "Zmieniono " + fmtNoteDate(n.updated);
-  const mv = document.createElement("label"); mv.className = "note-move"; mv.append("Katalog: ");
-  const sel = document.createElement("select"); sel.setAttribute("aria-label", "Przenieś do katalogu");
-  const opts = nFolders().map((f) => [f.id, f.name || "Katalog"]);
-  if (folderOf(n) === NOFOLDER) opts.push([NOFOLDER, "Bez katalogu"]);
+  const mv = document.createElement("label"); mv.className = "note-move"; mv.append("Zagadnienie: ");
+  const sel = document.createElement("select"); sel.setAttribute("aria-label", "Przenieś do innego zagadnienia");
+  const opts = nFolders().map((f) => [f.id, f.name || "Zagadnienie"]);
+  if (folderOf(n) === NOFOLDER) opts.push([NOFOLDER, "Bez zagadnienia"]);
   for (const [v, l] of opts) { const o = document.createElement("option"); o.value = v; o.textContent = l; sel.append(o); }
   sel.value = folderOf(n);
   sel.onchange = () => {
     notesFlush(); noteSave(id, { folder: sel.value === NOFOLDER ? null : sel.value });
     notesUI.folder = sel.value; lsSet("noteFolder", sel.value); notesUI.built = null; notesUI.sel = id; renderNotes();
-    note("Przeniesiono do katalogu „" + folderName(sel.value) + "”.");
+    note("Przeniesiono do zagadnienia „" + folderName(sel.value) + "”.");
   };
   mv.append(sel);
   meta.append(when, mv);
