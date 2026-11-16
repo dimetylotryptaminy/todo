@@ -896,3 +896,11 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none 
   .nf-root .notes-q { max-width: none; }
   .note-move select { font-size: 16px; }
 }
+
+/* przeciąganie notatek */
+.note-li { display: flex; align-items: center; gap: 2px; list-style: none; }
+.note-li .note-item { flex: 1; min-width: 0; }
+.note-grip { flex: none; width: 26px; height: 40px; border: 0; background: none; padding: 0; border-radius: 8px; }
+.note-li:hover .note-grip { opacity: 1; }
+.note-grip:focus-visible { outline: 2px solid var(--accent); opacity: 1; }
+.note-ghost { position: fixed; z-index: 50; margin: 0; pointer-events: none; background: var(--paper); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.25); transform: rotate(-1deg); }

@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v83";
+const APP_VERSION = "v84";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -2221,6 +2221,9 @@ const nFolders = () => Object.entries(store.items).filter(([, d]) => d && d.type
   .sort((a, b) => (a.name || "").localeCompare(b.name || "", "pl", { sensitivity: "base" }));
 const folderOf = (n) => (n.folder && store.items[n.folder] && store.items[n.folder].type === "nfolder" ? n.folder : NOFOLDER);
 const folderName = (fid) => (fid === NOFOLDER ? "Bez zagadnienia" : ((store.items[fid] || {}).name || "Zagadnienie"));
+// kolejność notatek w zagadnieniu: ręczna (przeciąganie); bez ustawionej — nowsze wyżej
+const noteOrd = (n) => (typeof n.order === "number" ? n.order : -(n.created || 0));
+const notesInFolder = (fid) => notesAll().filter((n) => folderOf(n) === fid).sort((a, b) => noteOrd(a) - noteOrd(b));
 const noteTitle = (n) => (n.title || "").trim() || ((n.body || "").trim().split("\n")[0] || "").slice(0, 80) || "Nowa notatka";
 const plNotes = (k) => k + " " + (k === 1 ? "notatka" : (k % 10 >= 2 && k % 10 <= 4 && (k % 100 < 12 || k % 100 > 14)) ? "notatki" : "notatek");
 const notesUI = { folder: lsGet("noteFolder", null), sel: lsGet("noteSel", null), q: "", editing: false, built: null, list: null, ed: null, edFor: null, saveT: null };
@@ -2269,7 +2272,8 @@ function notesOpenFolder(fid) {
 function notesLeave() { if (store && notesUI.sel) { notesFlush(); notesDropEmpty(notesUI.sel); } }
 function notesNew() {
   const id = newId(), now = Date.now();
-  write(id, { type: "note", title: "", body: "", folder: notesUI.folder === NOFOLDER ? null : notesUI.folder, created: now, updated: now });
+  const top = notesInFolder(notesUI.folder)[0];
+  write(id, { type: "note", title: "", body: "", folder: notesUI.folder === NOFOLDER ? null : notesUI.folder, order: top ? noteOrd(top) - 1000 : 0, created: now, updated: now });
   notesUI.q = ""; const q = notesUI.root && notesUI.root.querySelector(".notes-q"); if (q) q.value = "";
   notesSelect(id, false);
   const t = $("noteTitle"); if (t) t.focus();   // od razu, w tym samym stuknięciu — inaczej iPhone nie pokaże klawiatury
@@ -2304,6 +2308,74 @@ function folderDelete(fid) {
   write(fid, null);
   note(`Usunięto zagadnienie „${f.name}”.`, false, true);
   notesOpenFolder(null);
+}
+
+// --- przeciąganie notatek (zmiana kolejności w zagadnieniu) ---
+let ndrag = null;
+function noteDragStart(e, id, li) {
+  if (e.pointerType === "mouse" && e.button !== 0) return;
+  e.preventDefault();
+  const r = li.getBoundingClientRect();
+  const ghost = li.cloneNode(true); ghost.classList.add("note-ghost");
+  Object.assign(ghost.style, { width: r.width + "px", left: r.left + "px", top: r.top + "px" });
+  document.body.append(ghost);
+  const ph = document.createElement("li"); ph.className = "drag-ph"; ph.style.height = r.height + "px";
+  li.after(ph); li.style.display = "none";
+  ndrag = { id, li, ghost, ph, dx: e.clientX - r.left, dy: e.clientY - r.top, y: e.clientY, raf: 0, pending: false };
+  document.body.classList.add("dragging");
+  window.addEventListener("pointermove", noteDragMove, { passive: false });
+  window.addEventListener("pointerup", noteDragEnd);
+  window.addEventListener("pointercancel", noteDragCancel);
+  const scroll = () => {
+    if (!ndrag) return;
+    const top = 70, bottom = innerHeight - 110;
+    if (ndrag.y < top) window.scrollBy(0, -Math.ceil((top - ndrag.y) / 5)); else if (ndrag.y > bottom) window.scrollBy(0, Math.ceil((ndrag.y - bottom) / 5));
+    ndrag.raf = requestAnimationFrame(scroll);
+  };
+  ndrag.raf = requestAnimationFrame(scroll);
+}
+function noteDragMove(e) {
+  if (!ndrag) return;
+  e.preventDefault();
+  ndrag.y = e.clientY;
+  ndrag.ghost.style.left = (e.clientX - ndrag.dx) + "px"; ndrag.ghost.style.top = (e.clientY - ndrag.dy) + "px";
+  const ul = ndrag.ph.parentNode;
+  const rows = [...ul.children].filter((c) => c !== ndrag.li && c !== ndrag.ph && c.dataset.id);
+  const before = rows.find((c) => { const rr = c.getBoundingClientRect(); return e.clientY < rr.top + rr.height / 2; });
+  ul.insertBefore(ndrag.ph, before || null);
+}
+function noteDragFinish() {
+  cancelAnimationFrame(ndrag.raf); ndrag.ghost.remove(); ndrag.li.style.display = ""; ndrag.ph.remove();
+  document.body.classList.remove("dragging");
+  window.removeEventListener("pointermove", noteDragMove); window.removeEventListener("pointerup", noteDragEnd);
+  window.removeEventListener("pointercancel", noteDragCancel);
+  ndrag = null; renderNotes();
+}
+function noteDragEnd() {
+  if (!ndrag) return;
+  const { id, ph, li } = ndrag;
+  const sib = (dir) => { let n = ph[dir]; while (n && (n === li || !n.dataset.id)) n = n[dir]; return n ? store.items[n.dataset.id] : null; };
+  const prev = sib("previousElementSibling"), next = sib("nextElementSibling");
+  noteDragFinish();
+  noteSetOrder(id, prev, next);
+}
+function noteDragCancel() { if (ndrag) noteDragFinish(); }
+function noteSetOrder(id, prev, next) {
+  const n = store.items[id]; if (!n) return;
+  let order;
+  if (prev && next) order = (noteOrd(prev) + noteOrd(next)) / 2;
+  else if (prev) order = noteOrd(prev) + 1000;
+  else if (next) order = noteOrd(next) - 1000;
+  else return;
+  if (order === noteOrd(n)) return;
+  write(id, { ...n, order });            // bez zmiany daty „Zmieniono” — to tylko kolejność
+}
+function noteMoveBy(id, dir) {             // klawiatura: strzałka w górę / w dół
+  const list = notesInFolder(notesUI.folder), i = list.findIndex((x) => x.id === id), j = i + dir;
+  if (i < 0 || j < 0 || j >= list.length) return;
+  const rest = list.filter((x) => x.id !== id);
+  noteSetOrder(id, rest[j - 1] || null, rest[j] || null);
+  const g = notesUI.list && notesUI.list.querySelector(`[data-id="${id}"] .note-grip`); if (g) g.focus();
 }
 
 function renderNotes() {
@@ -2361,8 +2433,16 @@ function renderRoot() {
   }));
   body.replaceChildren(grid);
 }
-function noteItem(n, onClick, showFolder = false) {
-  const li = document.createElement("li");
+function noteItem(n, onClick, showFolder = false, movable = false) {
+  const li = document.createElement("li"); li.className = "note-li"; li.dataset.id = n.id;
+  if (movable) {
+    const g = document.createElement("button"); g.type = "button"; g.className = "grip note-grip"; g.innerHTML = gripSvg;
+    g.title = "Przeciągnij w górę lub w dół, żeby ustawić kolejność";
+    g.setAttribute("aria-label", "Przesuń notatkę „" + noteTitle(n) + "” (strzałki w górę i w dół)");
+    g.addEventListener("pointerdown", (e) => noteDragStart(e, n.id, li));
+    g.addEventListener("keydown", (e) => { if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); noteMoveBy(n.id, e.key === "ArrowUp" ? -1 : 1); } });
+    li.append(g);
+  }
   const b = document.createElement("button"); b.type = "button"; b.className = "note-item" + (n.id === notesUI.sel ? " sel" : "");
   b.setAttribute("aria-current", n.id === notesUI.sel ? "true" : "false");
   const t = document.createElement("span"); t.className = "ni-t"; t.textContent = noteTitle(n);
@@ -2398,11 +2478,12 @@ function buildFolderView(root) {
 }
 function renderFolderNotes() {
   const root = notesUI.root, fid = notesUI.folder;
+  if (ndrag) { ndrag.pending = true; return; }     // nie przebudowuj listy pod palcem
   root.querySelector(".nf-title").textContent = folderName(fid);
-  const all = notesAll().filter((n) => folderOf(n) === fid);
+  const all = notesInFolder(fid);
   const q = notesUI.q.trim().toLowerCase();
   const shown = q ? all.filter((n) => ((n.title || "") + "\n" + (n.body || "")).toLowerCase().includes(q)) : all;
-  const items = shown.map((n) => noteItem(n, () => notesSelect(n.id, false)));
+  const items = shown.map((n) => noteItem(n, () => notesSelect(n.id, false), false, !q && all.length > 1));
   if (!items.length) {
     const li = document.createElement("li"); li.className = "notes-empty muted";
     li.textContent = q ? "Brak notatek pasujących do „" + notesUI.q.trim() + "”." : "To zagadnienie jest puste. Kliknij „+ Nowa notatka”.";
@@ -2446,7 +2527,8 @@ function renderFolderNotes() {
   for (const [v, l] of opts) { const o = document.createElement("option"); o.value = v; o.textContent = l; sel.append(o); }
   sel.value = folderOf(n);
   sel.onchange = () => {
-    notesFlush(); noteSave(id, { folder: sel.value === NOFOLDER ? null : sel.value });
+    const top = notesInFolder(sel.value)[0];
+    notesFlush(); noteSave(id, { folder: sel.value === NOFOLDER ? null : sel.value, order: top ? noteOrd(top) - 1000 : 0 });
     notesUI.folder = sel.value; lsSet("noteFolder", sel.value); notesUI.built = null; notesUI.sel = id; renderNotes();
     note("Przeniesiono do zagadnienia „" + folderName(sel.value) + "”.");
   };
