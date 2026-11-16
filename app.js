@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v84";
+const APP_VERSION = "v85";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -2280,7 +2280,7 @@ function notesNew() {
 }
 function notesDelete(id) {
   const n = store.items[id]; if (!n) return;
-  if (((n.title || "") + (n.body || "")).trim() && !confirm("Usunąć notatkę „" + noteTitle(n) + "”?")) return;
+  if (!confirm("Czy na pewno usunąć notatkę „" + noteTitle(n) + "”?")) return;   // pytamy zawsze
   write(id, null); lastUndo = [[id, n]];
   notesUI.sel = null; lsSet("noteSel", null); notesUI.edFor = null;
   note("Usunięto notatkę „" + noteTitle(n) + "”.", false, true);
