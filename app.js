@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v79";
+const APP_VERSION = "v80";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -828,6 +828,7 @@ function renderInner() {
   $("tiMotto").classList.toggle("hand", hand);
   if (hand) $("tiMotto").setAttribute("aria-label", store.motto); else $("tiMotto").removeAttribute("aria-label");
   if (view === "calendar") renderCalendar();
+  if (view === "notes") renderNotes();
   // słówko: po zalogowaniu (albo zmianie dnia) przerysuj raz, żeby pobrać słówko z konta / od AI
   if (view === "words") { const k = (store.uid || "local") + "|" + (store.calendarId || "") + "|" + iso(new Date()); if (k !== wordsShownFor) { wordsShownFor = k; renderWords(); } }
   renderStatus();
@@ -2210,9 +2211,170 @@ function afterLogin() {
   $("shareDlg").hidden = false;
 }
 
+// ---------- NOTATKI ----------
+// Notatki są prywatne: zapisują się w tych samych „items” co zadania (type: "note"), więc działają offline
+// i synchronizują się między urządzeniami. Treść: zwykły tekst; linki w podglądzie są klikalne.
+const notesAll = () => Object.entries(store.items).filter(([, d]) => d && d.type === "note").map(([id, d]) => ({ id, ...d }))
+  .sort((a, b) => (b.updated || 0) - (a.updated || 0));
+const noteTitle = (n) => (n.title || "").trim() || ((n.body || "").trim().split("\n")[0] || "").slice(0, 80) || "Nowa notatka";
+const notesUI = { sel: lsGet("noteSel", null), q: "", editing: false, root: null, list: null, ed: null, edFor: null, saveT: null };
+const URL_RE = /\b(https?:\/\/[^\s<>"]+|www\.[^\s<>"]+\.[^\s<>"]+)/gi;
+function linkify(text) {
+  const frag = document.createDocumentFragment(); let last = 0;
+  for (const m of text.matchAll(URL_RE)) {
+    let u = m[0]; const trail = u.match(/[.,;:!?)\]]+$/); if (trail && !(trail[0] === ")" && u.includes("("))) u = u.slice(0, -trail[0].length);
+    if (m.index > last) frag.append(text.slice(last, m.index));
+    const a = document.createElement("a"); a.href = /^https?:/i.test(u) ? u : "https://" + u; a.textContent = u;
+    a.target = "_blank"; a.rel = "noopener noreferrer"; frag.append(a);
+    last = m.index + u.length;
+  }
+  if (last < text.length) frag.append(text.slice(last));
+  return frag;
+}
+const fmtNoteDate = (ms) => {
+  if (!ms) return ""; const d = new Date(ms), now = new Date();
+  if (d.toDateString() === now.toDateString()) return "dziś " + d.toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
+  const y = new Date(now); y.setDate(y.getDate() - 1);
+  if (d.toDateString() === y.toDateString()) return "wczoraj";
+  return d.getDate() + " " + MONTHS_GEN[d.getMonth()] + (d.getFullYear() !== now.getFullYear() ? " " + d.getFullYear() : "");
+};
+function noteSave(id, patch) {
+  const cur = store.items[id]; if (!cur) return;
+  write(id, { ...cur, ...patch, updated: Date.now() });
+}
+// pusta notatka (bez tytułu i treści) znika, gdy z niej wychodzisz
+function notesDropEmpty(id) {
+  const n = id && store && store.items[id];
+  if (n && n.type === "note" && !(n.title || "").trim() && !(n.body || "").trim()) store.del(id);
+}
+function notesSelect(id, editing = false) {
+  if (notesUI.sel && notesUI.sel !== id) { notesFlush(); notesDropEmpty(notesUI.sel); }
+  notesUI.sel = id; notesUI.editing = editing; notesUI.edFor = null; lsSet("noteSel", id);
+  renderNotes();
+}
+function notesLeave() { if (store && notesUI.sel) { notesFlush(); notesDropEmpty(notesUI.sel); } }
+function notesFlush() { if (notesUI.saveT) { clearTimeout(notesUI.saveT.t); notesUI.saveT.fn(); notesUI.saveT = null; } }
+function notesLater(fn) { if (notesUI.saveT) clearTimeout(notesUI.saveT.t); notesUI.saveT = { fn, t: setTimeout(() => { notesUI.saveT = null; fn(); }, 600) }; }
+function notesNew() {
+  const id = newId(), now = Date.now();
+  write(id, { type: "note", title: "", body: "", created: now, updated: now });
+  notesUI.q = ""; const q = notesUI.root && notesUI.root.querySelector(".notes-q"); if (q) q.value = "";
+  notesSelect(id, false);
+  const t = $("noteTitle"); if (t) t.focus();   // od razu, w tym samym stuknięciu — inaczej iPhone nie pokaże klawiatury
+}
+function notesDelete(id) {
+  const n = store.items[id]; if (!n) return;
+  if (((n.title || "") + (n.body || "")).trim() && !confirm("Usunąć notatkę „" + noteTitle(n) + "”?")) return;
+  write(id, null); lastUndo = [[id, n]];
+  notesUI.sel = null; lsSet("noteSel", null); notesUI.edFor = null;
+  note("Usunięto notatkę „" + noteTitle(n) + "”.", false, true);
+  renderNotes();
+}
+
+function renderNotes() {
+  const root = $("notes");
+  if (!notesUI.root) {
+    notesUI.root = root;
+    root.innerHTML = `<div class="notes-wrap">
+        <aside class="notes-side">
+          <div class="notes-head"><h2>Notatki</h2><button type="button" class="btn cal-add notes-new">+ Nowa notatka</button></div>
+          <input type="search" class="notes-q" placeholder="Szukaj w notatkach" aria-label="Szukaj w notatkach">
+          <ul class="notes-list" aria-label="Lista notatek"></ul>
+        </aside>
+        <div class="notes-ed"></div>
+      </div>`;
+    root.querySelector(".notes-new").onclick = notesNew;
+    const q = root.querySelector(".notes-q");
+    q.oninput = () => { notesUI.q = q.value; renderNotes(); };
+    notesUI.list = root.querySelector(".notes-list"); notesUI.ed = root.querySelector(".notes-ed");
+  }
+  const all = notesAll();
+  if (notesUI.sel && !store.items[notesUI.sel]) { notesUI.sel = null; notesUI.edFor = null; }
+  const q = notesUI.q.trim().toLowerCase();
+  const shown = q ? all.filter((n) => ((n.title || "") + "\n" + (n.body || "")).toLowerCase().includes(q)) : all;
+
+  // lista
+  const items = shown.map((n) => {
+    const li = document.createElement("li");
+    const b = document.createElement("button"); b.type = "button"; b.className = "note-item" + (n.id === notesUI.sel ? " sel" : "");
+    b.setAttribute("aria-current", n.id === notesUI.sel ? "true" : "false");
+    const t = document.createElement("span"); t.className = "ni-t"; t.textContent = noteTitle(n);
+    const body = (n.body || "").trim(); const firstIsTitle = !(n.title || "").trim();
+    const prev = (firstIsTitle ? body.split("\n").slice(1).join(" ") : body).replace(/\s+/g, " ").slice(0, 120);
+    const m = document.createElement("span"); m.className = "ni-m";
+    const dt = document.createElement("span"); dt.className = "ni-d"; dt.textContent = fmtNoteDate(n.updated);
+    m.append(dt, prev ? " · " + prev : "");
+    b.append(t, m);
+    b.onclick = () => notesSelect(n.id, false);
+    li.append(b); return li;
+  });
+  if (!items.length) {
+    const li = document.createElement("li"); li.className = "notes-empty muted";
+    li.textContent = q ? "Brak notatek pasujących do „" + notesUI.q.trim() + "”." : "Nie masz jeszcze notatek. Kliknij „+ Nowa notatka”.";
+    items.push(li);
+  }
+  notesUI.list.replaceChildren(...items);
+  root.classList.toggle("has-sel", !!notesUI.sel);
+
+  // edytor — nie przebudowujemy go, gdy w nim piszesz
+  const ed = notesUI.ed;
+  if (ed.contains(document.activeElement) && notesUI.edFor === notesUI.sel) {
+    const n = store.items[notesUI.sel]; const d = ed.querySelector(".note-date"); if (n && d) d.textContent = "Zmieniono " + fmtNoteDate(n.updated);
+    return;
+  }
+  notesUI.edFor = notesUI.sel;
+  if (!notesUI.sel) {
+    const p = document.createElement("div"); p.className = "notes-placeholder muted";
+    p.textContent = all.length ? "Wybierz notatkę z listy albo dodaj nową." : "Tu pojawi się treść notatki.";
+    ed.replaceChildren(p); return;
+  }
+  const id = notesUI.sel, n = store.items[id];
+
+  const top = document.createElement("div"); top.className = "note-top";
+  const back = document.createElement("button"); back.type = "button"; back.className = "yearbtn note-back"; back.textContent = "‹"; back.setAttribute("aria-label", "Wróć do listy notatek");
+  back.onclick = () => notesSelect(null);
+  const title = document.createElement("input"); title.id = "noteTitle"; title.className = "note-title"; title.value = n.title || "";
+  title.placeholder = "Tytuł notatki"; title.setAttribute("aria-label", "Tytuł notatki"); title.autocomplete = "off";
+  title.oninput = () => notesLater(() => noteSave(id, { title: title.value }));
+  title.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); notesFlush(); startEdit(); } };
+  title.onblur = () => notesFlush();
+  const del = document.createElement("button"); del.type = "button"; del.className = "ghost note-del"; del.textContent = "Usuń";
+  del.onclick = () => notesDelete(id);
+  top.append(back, title, del);
+
+  const meta = document.createElement("div"); meta.className = "note-date muted"; meta.textContent = "Zmieniono " + fmtNoteDate(n.updated);
+
+  const box = document.createElement("div"); box.className = "note-body";
+  const startEdit = (caretAtEnd = true) => {
+    notesUI.editing = true;
+    const ta = document.createElement("textarea"); ta.className = "note-ta"; ta.value = (store.items[id] || n).body || "";
+    ta.placeholder = "Pisz tutaj… możesz wklejać linki, listy, cokolwiek."; ta.setAttribute("aria-label", "Treść notatki");
+    const fit = () => { ta.style.height = "auto"; ta.style.height = Math.max(ta.scrollHeight + 2, 220) + "px"; };
+    ta.oninput = () => { fit(); notesLater(() => noteSave(id, { body: ta.value })); };
+    ta.onblur = () => {
+      notesFlush(); notesUI.editing = false;
+      setTimeout(() => { if (notesUI.sel === id && !box.contains(document.activeElement)) showView(); }, 0);
+    };
+    box.replaceChildren(ta); fit(); ta.focus({ preventScroll: true });
+    if (caretAtEnd) ta.setSelectionRange(ta.value.length, ta.value.length);
+  };
+  const showView = () => {
+    const cur = store.items[id] || n;
+    const v = document.createElement("div"); v.className = "note-view"; v.tabIndex = 0; v.setAttribute("role", "button");
+    v.setAttribute("aria-label", "Treść notatki — stuknij, aby edytować");
+    if ((cur.body || "").trim()) v.append(linkify(cur.body)); else { v.classList.add("empty"); v.textContent = "Stuknij, aby pisać…"; }
+    v.onclick = (e) => { if (e.target.closest("a") || (getSelection() + "")) return; startEdit(); };
+    v.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); startEdit(); } };
+    box.replaceChildren(v);
+  };
+  if (notesUI.editing) startEdit(); else showView();
+
+  ed.replaceChildren(top, meta, box);
+}
+
 // ---------- zakładki ZADANIA / KALENDARZ / SŁÓWKO NA DZIŚ ----------
-const VIEWS = { tasks: { tab: "tabTasks", el: "sheet", hash: "" }, calendar: { tab: "tabCal", el: "calendar", hash: "#kalendarz" }, words: { tab: "tabWords", el: "words", hash: "#slowko" } };
-let view = location.hash === "#kalendarz" ? "calendar" : location.hash === "#slowko" ? "words" : lsGet("view", "tasks");
+const VIEWS = { tasks: { tab: "tabTasks", el: "sheet", hash: "" }, calendar: { tab: "tabCal", el: "calendar", hash: "#kalendarz" }, words: { tab: "tabWords", el: "words", hash: "#slowko" }, notes: { tab: "tabNotes", el: "notes", hash: "#notatki" } };
+let view = location.hash === "#kalendarz" ? "calendar" : location.hash === "#slowko" ? "words" : location.hash === "#notatki" ? "notes" : lsGet("view", "tasks");
 if (!VIEWS[view]) view = "tasks";
 function setView(v) {
   view = v; lsSet("view", v);
@@ -2228,6 +2390,9 @@ function applyView() {
   }
   document.body.classList.toggle("view-calendar", view === "calendar");
   document.body.classList.toggle("view-words", view === "words");
+  document.body.classList.toggle("view-notes", view === "notes");
+  if (view !== "notes") notesLeave();
+  if (view === "notes" && store) renderNotes();
   if (view === "calendar" && store) renderCalendar();
   if (view === "words") renderWords();
 }
@@ -2235,6 +2400,7 @@ let wordsShownFor = "";
 $("tabTasks").addEventListener("click", () => setView("tasks"));
 $("tabCal").addEventListener("click", () => setView("calendar"));
 $("tabWords").addEventListener("click", () => setView("words"));
+$("tabNotes").addEventListener("click", () => setView("notes"));
 applyView();
 // ---------------- boot ----------------
 buildSheet();
