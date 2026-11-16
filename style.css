@@ -864,3 +864,35 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none 
   .tab .lbl svg { width: 18px; height: 18px; }
 }
 @media (max-width: 360px) { .tab .lbl { font-size: 10px; letter-spacing: 0; } }
+
+/* katalogi notatek */
+.nf-root { display: flex; flex-direction: column; gap: 12px; }
+.nf-root .notes-q { max-width: 420px; }
+.nf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-top: 4px; }
+.nf-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 14px 16px 16px; min-height: 112px; text-align: left;
+  border: 1px solid var(--hair); border-radius: 16px; background: var(--paper); color: var(--ink); font: inherit; cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s; }
+.nf-tile:hover { border-color: #1f63c6; box-shadow: 0 4px 14px rgba(31,99,198,.12); transform: translateY(-1px); }
+.nf-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.nf-ic { color: #e0a526; display: inline-grid; }
+.nf-ic svg { width: 34px; height: 34px; }
+.nf-tile .nf-ic { margin-bottom: 4px; }
+.nf-name { font-weight: 700; font-size: 16px; overflow-wrap: anywhere; }
+.nf-meta { font-size: 12.5px; color: var(--ink-soft); }
+.muted-tile .nf-ic { color: var(--done); }
+.nf-crumb { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.nf-crumb .nf-ic svg { width: 26px; height: 26px; }
+.nf-title { margin: 0; font-size: 24px; font-weight: 700; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.nf-crumb .ghost { font-size: 14px; }
+.nf-del { color: var(--warn); }
+.notes-side .notes-new { align-self: stretch; }
+.note-date { display: flex; align-items: center; gap: 6px 14px; flex-wrap: wrap; }
+.note-move { display: inline-flex; align-items: center; gap: 6px; }
+.note-move select { font: inherit; font-size: 13px; padding: 3px 6px; border: 1px solid var(--hair); border-radius: 8px; background: var(--paper); color: var(--ink); max-width: 200px; }
+@media (max-width: 640px) {
+  .nf-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .nf-tile { min-height: 100px; padding: 12px; }
+  .notes.has-sel .nf-crumb { display: none; }
+  .nf-title { font-size: 20px; }
+  .nf-root .notes-q { max-width: none; }
+  .note-move select { font-size: 16px; }
+}

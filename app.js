@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v80";
+const APP_VERSION = "v81";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -2211,13 +2211,19 @@ function afterLogin() {
   $("shareDlg").hidden = false;
 }
 
-// ---------- NOTATKI ----------
-// Notatki są prywatne: zapisują się w tych samych „items” co zadania (type: "note"), więc działają offline
-// i synchronizują się między urządzeniami. Treść: zwykły tekst; linki w podglądzie są klikalne.
+// ---------- NOTATKI (katalogi → notatki) ----------
+// Wszystko jest prywatne i zapisuje się w tych samych „items” co zadania (działa offline, synchronizuje się):
+// katalog = type "nfolder" {name}, notatka = type "note" {title, body, folder}. Linki w treści są klikalne.
+const NOFOLDER = "_bez";                     // notatki bez katalogu (np. sprzed wprowadzenia katalogów)
 const notesAll = () => Object.entries(store.items).filter(([, d]) => d && d.type === "note").map(([id, d]) => ({ id, ...d }))
   .sort((a, b) => (b.updated || 0) - (a.updated || 0));
+const nFolders = () => Object.entries(store.items).filter(([, d]) => d && d.type === "nfolder").map(([id, d]) => ({ id, ...d }))
+  .sort((a, b) => (a.name || "").localeCompare(b.name || "", "pl", { sensitivity: "base" }));
+const folderOf = (n) => (n.folder && store.items[n.folder] && store.items[n.folder].type === "nfolder" ? n.folder : NOFOLDER);
+const folderName = (fid) => (fid === NOFOLDER ? "Bez katalogu" : ((store.items[fid] || {}).name || "Katalog"));
 const noteTitle = (n) => (n.title || "").trim() || ((n.body || "").trim().split("\n")[0] || "").slice(0, 80) || "Nowa notatka";
-const notesUI = { sel: lsGet("noteSel", null), q: "", editing: false, root: null, list: null, ed: null, edFor: null, saveT: null };
+const plNotes = (k) => k + " " + (k === 1 ? "notatka" : (k % 10 >= 2 && k % 10 <= 4 && (k % 100 < 12 || k % 100 > 14)) ? "notatki" : "notatek");
+const notesUI = { folder: lsGet("noteFolder", null), sel: lsGet("noteSel", null), q: "", editing: false, built: null, list: null, ed: null, edFor: null, saveT: null };
 const URL_RE = /\b(https?:\/\/[^\s<>"]+|www\.[^\s<>"]+\.[^\s<>"]+)/gi;
 function linkify(text) {
   const frag = document.createDocumentFragment(); let last = 0;
@@ -2238,26 +2244,32 @@ const fmtNoteDate = (ms) => {
   if (d.toDateString() === y.toDateString()) return "wczoraj";
   return d.getDate() + " " + MONTHS_GEN[d.getMonth()] + (d.getFullYear() !== now.getFullYear() ? " " + d.getFullYear() : "");
 };
+const FOLDER_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.4l2 2.2h8.6A1.5 1.5 0 0 1 21 9.7v8.8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z" fill="currentColor"/></svg>';
 function noteSave(id, patch) {
   const cur = store.items[id]; if (!cur) return;
   write(id, { ...cur, ...patch, updated: Date.now() });
 }
-// pusta notatka (bez tytułu i treści) znika, gdy z niej wychodzisz
-function notesDropEmpty(id) {
+function notesDropEmpty(id) {   // pusta notatka (bez tytułu i treści) znika, gdy z niej wychodzisz
   const n = id && store && store.items[id];
   if (n && n.type === "note" && !(n.title || "").trim() && !(n.body || "").trim()) store.del(id);
 }
+function notesFlush() { if (notesUI.saveT) { clearTimeout(notesUI.saveT.t); const f = notesUI.saveT.fn; notesUI.saveT = null; f(); } }
+function notesLater(fn) { if (notesUI.saveT) clearTimeout(notesUI.saveT.t); notesUI.saveT = { fn, t: setTimeout(() => { notesUI.saveT = null; fn(); }, 600) }; }
 function notesSelect(id, editing = false) {
   if (notesUI.sel && notesUI.sel !== id) { notesFlush(); notesDropEmpty(notesUI.sel); }
   notesUI.sel = id; notesUI.editing = editing; notesUI.edFor = null; lsSet("noteSel", id);
   renderNotes();
 }
+function notesOpenFolder(fid) {
+  if (notesUI.sel) { notesFlush(); notesDropEmpty(notesUI.sel); }
+  notesUI.folder = fid; notesUI.sel = null; notesUI.q = ""; notesUI.edFor = null; notesUI.built = null;
+  lsSet("noteFolder", fid); lsSet("noteSel", null);
+  renderNotes(); window.scrollTo({ top: 0 });
+}
 function notesLeave() { if (store && notesUI.sel) { notesFlush(); notesDropEmpty(notesUI.sel); } }
-function notesFlush() { if (notesUI.saveT) { clearTimeout(notesUI.saveT.t); notesUI.saveT.fn(); notesUI.saveT = null; } }
-function notesLater(fn) { if (notesUI.saveT) clearTimeout(notesUI.saveT.t); notesUI.saveT = { fn, t: setTimeout(() => { notesUI.saveT = null; fn(); }, 600) }; }
 function notesNew() {
   const id = newId(), now = Date.now();
-  write(id, { type: "note", title: "", body: "", created: now, updated: now });
+  write(id, { type: "note", title: "", body: "", folder: notesUI.folder === NOFOLDER ? null : notesUI.folder, created: now, updated: now });
   notesUI.q = ""; const q = notesUI.root && notesUI.root.querySelector(".notes-q"); if (q) q.value = "";
   notesSelect(id, false);
   const t = $("noteTitle"); if (t) t.focus();   // od razu, w tym samym stuknięciu — inaczej iPhone nie pokaże klawiatury
@@ -2270,56 +2282,140 @@ function notesDelete(id) {
   note("Usunięto notatkę „" + noteTitle(n) + "”.", false, true);
   renderNotes();
 }
+function folderNew() {
+  const name = (prompt("Nazwa nowego katalogu (np. Soto, Praca, Przepisy):") || "").trim();
+  if (!name) return;
+  const id = newId(), now = Date.now();
+  write(id, { type: "nfolder", name, created: now, updated: now });
+  notesOpenFolder(id);
+}
+function folderRename(fid) {
+  const f = store.items[fid]; if (!f) return;
+  const name = (prompt("Nowa nazwa katalogu:", f.name || "") || "").trim();
+  if (!name || name === f.name) return;
+  write(fid, { ...f, name, updated: Date.now() }); notesUI.built = null; renderNotes();
+}
+function folderDelete(fid) {
+  const f = store.items[fid]; if (!f) return;
+  const inside = notesAll().filter((n) => folderOf(n) === fid);
+  if (!confirm(inside.length ? `Usunąć katalog „${f.name}” razem z ${plNotes(inside.length).replace(/notatka$/, "notatką").replace(/notatki$/, "notatkami").replace(/notatek$/, "notatkami")}?` : `Usunąć pusty katalog „${f.name}”?`)) return;
+  lastUndo = [[fid, f], ...inside.map((n) => [n.id, strip(n)])];
+  for (const n of inside) write(n.id, null);
+  write(fid, null);
+  note(`Usunięto katalog „${f.name}”.`, false, true);
+  notesOpenFolder(null);
+}
 
 function renderNotes() {
   const root = $("notes");
-  if (!notesUI.root) {
-    notesUI.root = root;
-    root.innerHTML = `<div class="notes-wrap">
+  notesUI.root = root;
+  // katalog zniknął (usunięty na innym urządzeniu) albo „Bez katalogu” jest już puste → wróć do katalogów
+  if (notesUI.folder && notesUI.folder !== NOFOLDER && !(store.items[notesUI.folder] && store.items[notesUI.folder].type === "nfolder")) notesUI.folder = null;
+  if (notesUI.folder === NOFOLDER && !notesAll().some((n) => folderOf(n) === NOFOLDER)) notesUI.folder = null;
+  if (notesUI.sel && !(store.items[notesUI.sel] && folderOf(store.items[notesUI.sel]) === notesUI.folder)) { notesUI.sel = null; notesUI.edFor = null; }
+  const level = notesUI.folder ? "f:" + notesUI.folder : "root";
+  if (notesUI.built !== level) { notesUI.built = level; notesUI.edFor = null; (notesUI.folder ? buildFolderView : buildRootView)(root); }
+  root.classList.toggle("in-folder", !!notesUI.folder);
+  root.classList.toggle("has-sel", !!notesUI.sel);
+  if (notesUI.folder) renderFolderNotes(); else renderRoot();
+}
+
+// --- poziom 1: katalogi ---
+function buildRootView(root) {
+  root.innerHTML = `<div class="nf-root">
+      <div class="notes-head"><h2>Notatki</h2><button type="button" class="btn cal-add nf-new">+ Nowy katalog</button></div>
+      <input type="search" class="notes-q" placeholder="Szukaj we wszystkich notatkach" aria-label="Szukaj we wszystkich notatkach">
+      <div class="nf-body"></div>
+    </div>`;
+  root.querySelector(".nf-new").onclick = folderNew;
+  const q = root.querySelector(".notes-q");
+  q.oninput = () => { notesUI.q = q.value; renderNotes(); };
+}
+function renderRoot() {
+  const body = notesUI.root.querySelector(".nf-body");
+  const all = notesAll(), q = notesUI.q.trim().toLowerCase();
+  if (q) {
+    const hits = all.filter((n) => ((n.title || "") + "\n" + (n.body || "")).toLowerCase().includes(q));
+    const ul = document.createElement("ul"); ul.className = "notes-list";
+    ul.append(...hits.map((n) => noteItem(n, () => { const f = folderOf(n); notesOpenFolder(f); notesSelect(n.id); }, true)));
+    if (!hits.length) { const li = document.createElement("li"); li.className = "notes-empty muted"; li.textContent = "Brak notatek pasujących do „" + notesUI.q.trim() + "”."; ul.append(li); }
+    body.replaceChildren(ul); return;
+  }
+  const tiles = nFolders().map((f) => ({ id: f.id, name: f.name || "Katalog" }));
+  if (all.some((n) => folderOf(n) === NOFOLDER)) tiles.push({ id: NOFOLDER, name: "Bez katalogu", muted: true });
+  if (!tiles.length) {
+    const p = document.createElement("p"); p.className = "notes-empty muted";
+    p.textContent = "Nie masz jeszcze katalogów. Utwórz pierwszy, np. „Soto”, „Praca” albo „Przepisy”, a w nim notatki.";
+    body.replaceChildren(p); return;
+  }
+  const grid = document.createElement("div"); grid.className = "nf-grid";
+  grid.append(...tiles.map((f) => {
+    const inside = all.filter((n) => folderOf(n) === f.id);
+    const b = document.createElement("button"); b.type = "button"; b.className = "nf-tile" + (f.muted ? " muted-tile" : "");
+    const ic = document.createElement("span"); ic.className = "nf-ic"; ic.innerHTML = FOLDER_SVG;
+    const t = document.createElement("span"); t.className = "nf-name"; t.textContent = f.name;
+    const m = document.createElement("span"); m.className = "nf-meta";
+    m.textContent = inside.length ? plNotes(inside.length) + " · " + fmtNoteDate(inside[0].updated) : "pusty";
+    b.append(ic, t, m); b.onclick = () => notesOpenFolder(f.id);
+    return b;
+  }));
+  body.replaceChildren(grid);
+}
+function noteItem(n, onClick, showFolder = false) {
+  const li = document.createElement("li");
+  const b = document.createElement("button"); b.type = "button"; b.className = "note-item" + (n.id === notesUI.sel ? " sel" : "");
+  b.setAttribute("aria-current", n.id === notesUI.sel ? "true" : "false");
+  const t = document.createElement("span"); t.className = "ni-t"; t.textContent = noteTitle(n);
+  const body = (n.body || "").trim(); const firstIsTitle = !(n.title || "").trim();
+  const prev = (firstIsTitle ? body.split("\n").slice(1).join(" ") : body).replace(/\s+/g, " ").slice(0, 120);
+  const m = document.createElement("span"); m.className = "ni-m";
+  const dt = document.createElement("span"); dt.className = "ni-d"; dt.textContent = (showFolder ? folderName(folderOf(n)) + " · " : "") + fmtNoteDate(n.updated);
+  m.append(dt, prev ? " · " + prev : "");
+  b.append(t, m); b.onclick = onClick;
+  li.append(b); return li;
+}
+
+// --- poziom 2: notatki w katalogu (lista + edytor) ---
+function buildFolderView(root) {
+  const fid = notesUI.folder, real = fid !== NOFOLDER;
+  root.innerHTML = `<div class="nf-crumb">
+        <button type="button" class="yearbtn nf-up" aria-label="Wróć do katalogów">‹</button>
+        <span class="nf-ic">${FOLDER_SVG}</span><h2 class="nf-title"></h2>
+        ${real ? '<button type="button" class="ghost nf-ren">Zmień nazwę</button><button type="button" class="ghost nf-del">Usuń katalog</button>' : ""}
+      </div>
+      <div class="notes-wrap">
         <aside class="notes-side">
-          <div class="notes-head"><h2>Notatki</h2><button type="button" class="btn cal-add notes-new">+ Nowa notatka</button></div>
-          <input type="search" class="notes-q" placeholder="Szukaj w notatkach" aria-label="Szukaj w notatkach">
+          <button type="button" class="btn cal-add notes-new">+ Nowa notatka</button>
+          <input type="search" class="notes-q" placeholder="Szukaj w tym katalogu" aria-label="Szukaj w tym katalogu">
           <ul class="notes-list" aria-label="Lista notatek"></ul>
         </aside>
         <div class="notes-ed"></div>
       </div>`;
-    root.querySelector(".notes-new").onclick = notesNew;
-    const q = root.querySelector(".notes-q");
-    q.oninput = () => { notesUI.q = q.value; renderNotes(); };
-    notesUI.list = root.querySelector(".notes-list"); notesUI.ed = root.querySelector(".notes-ed");
-  }
-  const all = notesAll();
-  if (notesUI.sel && !store.items[notesUI.sel]) { notesUI.sel = null; notesUI.edFor = null; }
+  root.querySelector(".nf-up").onclick = () => notesOpenFolder(null);
+  root.querySelector(".notes-new").onclick = notesNew;
+  if (real) { root.querySelector(".nf-ren").onclick = () => folderRename(fid); root.querySelector(".nf-del").onclick = () => folderDelete(fid); }
+  const q = root.querySelector(".notes-q");
+  q.oninput = () => { notesUI.q = q.value; renderNotes(); };
+  notesUI.list = root.querySelector(".notes-list"); notesUI.ed = root.querySelector(".notes-ed");
+}
+function renderFolderNotes() {
+  const root = notesUI.root, fid = notesUI.folder;
+  root.querySelector(".nf-title").textContent = folderName(fid);
+  const all = notesAll().filter((n) => folderOf(n) === fid);
   const q = notesUI.q.trim().toLowerCase();
   const shown = q ? all.filter((n) => ((n.title || "") + "\n" + (n.body || "")).toLowerCase().includes(q)) : all;
-
-  // lista
-  const items = shown.map((n) => {
-    const li = document.createElement("li");
-    const b = document.createElement("button"); b.type = "button"; b.className = "note-item" + (n.id === notesUI.sel ? " sel" : "");
-    b.setAttribute("aria-current", n.id === notesUI.sel ? "true" : "false");
-    const t = document.createElement("span"); t.className = "ni-t"; t.textContent = noteTitle(n);
-    const body = (n.body || "").trim(); const firstIsTitle = !(n.title || "").trim();
-    const prev = (firstIsTitle ? body.split("\n").slice(1).join(" ") : body).replace(/\s+/g, " ").slice(0, 120);
-    const m = document.createElement("span"); m.className = "ni-m";
-    const dt = document.createElement("span"); dt.className = "ni-d"; dt.textContent = fmtNoteDate(n.updated);
-    m.append(dt, prev ? " · " + prev : "");
-    b.append(t, m);
-    b.onclick = () => notesSelect(n.id, false);
-    li.append(b); return li;
-  });
+  const items = shown.map((n) => noteItem(n, () => notesSelect(n.id, false)));
   if (!items.length) {
     const li = document.createElement("li"); li.className = "notes-empty muted";
-    li.textContent = q ? "Brak notatek pasujących do „" + notesUI.q.trim() + "”." : "Nie masz jeszcze notatek. Kliknij „+ Nowa notatka”.";
+    li.textContent = q ? "Brak notatek pasujących do „" + notesUI.q.trim() + "”." : "Ten katalog jest pusty. Kliknij „+ Nowa notatka”.";
     items.push(li);
   }
   notesUI.list.replaceChildren(...items);
-  root.classList.toggle("has-sel", !!notesUI.sel);
 
   // edytor — nie przebudowujemy go, gdy w nim piszesz
   const ed = notesUI.ed;
   if (ed.contains(document.activeElement) && notesUI.edFor === notesUI.sel) {
-    const n = store.items[notesUI.sel]; const d = ed.querySelector(".note-date"); if (n && d) d.textContent = "Zmieniono " + fmtNoteDate(n.updated);
+    const n = store.items[notesUI.sel]; const d = ed.querySelector(".note-when"); if (n && d) d.textContent = "Zmieniono " + fmtNoteDate(n.updated);
     return;
   }
   notesUI.edFor = notesUI.sel;
@@ -2342,10 +2438,25 @@ function renderNotes() {
   del.onclick = () => notesDelete(id);
   top.append(back, title, del);
 
-  const meta = document.createElement("div"); meta.className = "note-date muted"; meta.textContent = "Zmieniono " + fmtNoteDate(n.updated);
+  // data zmiany + przeniesienie do innego katalogu
+  const meta = document.createElement("div"); meta.className = "note-date muted";
+  const when = document.createElement("span"); when.className = "note-when"; when.textContent = "Zmieniono " + fmtNoteDate(n.updated);
+  const mv = document.createElement("label"); mv.className = "note-move"; mv.append("Katalog: ");
+  const sel = document.createElement("select"); sel.setAttribute("aria-label", "Przenieś do katalogu");
+  const opts = nFolders().map((f) => [f.id, f.name || "Katalog"]);
+  if (folderOf(n) === NOFOLDER) opts.push([NOFOLDER, "Bez katalogu"]);
+  for (const [v, l] of opts) { const o = document.createElement("option"); o.value = v; o.textContent = l; sel.append(o); }
+  sel.value = folderOf(n);
+  sel.onchange = () => {
+    notesFlush(); noteSave(id, { folder: sel.value === NOFOLDER ? null : sel.value });
+    notesUI.folder = sel.value; lsSet("noteFolder", sel.value); notesUI.built = null; notesUI.sel = id; renderNotes();
+    note("Przeniesiono do katalogu „" + folderName(sel.value) + "”.");
+  };
+  mv.append(sel);
+  meta.append(when, mv);
 
   const box = document.createElement("div"); box.className = "note-body";
-  const startEdit = (caretAtEnd = true) => {
+  const startEdit = () => {
     notesUI.editing = true;
     const ta = document.createElement("textarea"); ta.className = "note-ta"; ta.value = (store.items[id] || n).body || "";
     ta.placeholder = "Pisz tutaj… możesz wklejać linki, listy, cokolwiek."; ta.setAttribute("aria-label", "Treść notatki");
@@ -2356,7 +2467,7 @@ function renderNotes() {
       setTimeout(() => { if (notesUI.sel === id && !box.contains(document.activeElement)) showView(); }, 0);
     };
     box.replaceChildren(ta); fit(); ta.focus({ preventScroll: true });
-    if (caretAtEnd) ta.setSelectionRange(ta.value.length, ta.value.length);
+    ta.setSelectionRange(ta.value.length, ta.value.length);
   };
   const showView = () => {
     const cur = store.items[id] || n;
