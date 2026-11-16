@@ -904,3 +904,11 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none 
 .note-li:hover .note-grip { opacity: 1; }
 .note-grip:focus-visible { outline: 2px solid var(--accent); opacity: 1; }
 .note-ghost { position: fixed; z-index: 50; margin: 0; pointer-events: none; background: var(--paper); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.25); transform: rotate(-1deg); }
+
+/* poprawki widoku zagadnienia na telefonie */
+.notes-side .notes-new { flex: none; }
+.nf-title { flex: 1 1 140px; min-width: 140px; overflow-wrap: break-word; }
+.nf-crumb { row-gap: 4px; }
+@media (max-width: 640px) {
+  .nf-crumb .ghost { padding: 4px 2px; margin-right: 10px; }
+}

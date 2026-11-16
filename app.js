@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v85";
+const APP_VERSION = "v86";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -2493,11 +2493,9 @@ function renderFolderNotes() {
 
   // edytor — nie przebudowujemy go, gdy w nim piszesz
   const ed = notesUI.ed;
-  if (ed.contains(document.activeElement) && notesUI.edFor === notesUI.sel) {
-    const n = store.items[notesUI.sel]; const d = ed.querySelector(".note-when"); if (n && d) d.textContent = "Zmieniono " + fmtNoteDate(n.updated);
-    return;
-  }
-  notesUI.edFor = notesUI.sel;
+  // ta sama notatka już jest na ekranie → tylko odśwież to, co się zmieniło (bez podmiany przycisków pod palcem)
+  if (notesUI.sel && notesUI.edFor === notesUI.sel && notesUI.edRefresh && ed.isConnected && ed.firstChild) { notesUI.edRefresh(); return; }
+  notesUI.edFor = notesUI.sel; notesUI.edRefresh = null;
   if (!notesUI.sel) {
     const p = document.createElement("div"); p.className = "notes-placeholder muted";
     p.textContent = all.length ? "Wybierz notatkę z listy albo dodaj nową." : "Tu pojawi się treść notatki.";
@@ -2561,6 +2559,13 @@ function renderFolderNotes() {
   if (notesUI.editing) startEdit(); else showView();
 
   ed.replaceChildren(top, meta, box);
+  let shownBody = (n.body || "");
+  notesUI.edRefresh = () => {
+    const cur = store.items[id]; if (!cur) return;
+    when.textContent = "Zmieniono " + fmtNoteDate(cur.updated);
+    if (document.activeElement !== title && title.value !== (cur.title || "")) title.value = cur.title || "";
+    if (box.querySelector(".note-view") && (cur.body || "") !== shownBody) { shownBody = cur.body || ""; showView(); }
+  };
 }
 
 // ---------- zakładki ZADANIA / KALENDARZ / SŁÓWKO NA DZIŚ ----------
