@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v86";
+const APP_VERSION = "v87";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -408,6 +408,8 @@ const archivedTodos = () => Object.entries(store.items).filter(([, d]) => d && d
 const ord = (t) => (typeof t.order === "number" ? t.order : t.created || 0);
 const strip = ({ id, ...rest }) => rest;
 let flashId = null, lastUndo = null;
+// nowe zadanie trafia na samą górę pola (przed wszystkie dotychczasowe)
+const topOrder = (cat) => { const xs = todos().filter((t) => t.cat === cat).map(ord); return xs.length ? Math.min(...xs) - 1000 : Date.now(); };
 
 function write(id, data) {
   // wydarzenia kalendarza idą do wspólnego kalendarza (jeśli jest), reszta do własnych zadań
@@ -518,7 +520,7 @@ function makeBox(f) {
     if (e.key === "Enter" && !e.isComposing) {
       const text = add.value.trim(); if (!text) return;
       const id = newId(); flashId = id;
-      write(id, { type: "todo", cat, text, done: false, created: Date.now(), updated: Date.now() });
+      write(id, { type: "todo", cat, text, done: false, order: topOrder(cat), created: Date.now(), updated: Date.now() });
       add.value = "";
     }
   });
@@ -928,7 +930,7 @@ function run(text) {
     if (o.op === "undo") { undo(); return; }
     if (o.op === "add") {
       const id = newId(); flashId = id; undoList.push([id, null]);
-      write(id, { type: "todo", cat: o.cat, text: o.text, done: false, created: Date.now(), updated: Date.now() });
+      write(id, { type: "todo", cat: o.cat, text: o.text, done: false, order: topOrder(o.cat), created: Date.now(), updated: Date.now() });
       changed++; continue;
     }
     const t = byId[o.id]; if (!t) continue;
@@ -1006,7 +1008,7 @@ if (IOS && !SR) {
     if (!t) return;
     const textCap = t.charAt(0).toUpperCase() + t.slice(1);
     const id = newId(); flashId = id;
-    write(id, { type: "todo", cat: targetCat, text: textCap, done: false, created: Date.now(), updated: Date.now() });
+    write(id, { type: "todo", cat: targetCat, text: textCap, done: false, order: topOrder(targetCat), created: Date.now(), updated: Date.now() });
     lastUndo = [[id, null]];
     note(`Dodano do ${fieldName(targetCat)}: ${textCap}`, false, true);
   }
@@ -1431,7 +1433,7 @@ async function transcribe(blob, cat, btn, tok = { cancelled: false }) {
     if (cat) {
       const t = text.charAt(0).toUpperCase() + text.slice(1);
       const id = newId(); flashId = id;
-      write(id, { type: "todo", cat, text: t, done: false, created: Date.now(), updated: Date.now() });
+      write(id, { type: "todo", cat, text: t, done: false, order: topOrder(cat), created: Date.now(), updated: Date.now() });
       lastUndo = [[id, null]];
       note(`Dodano do ${fieldName(cat)}: ${t}`, false, true);
       voText(t); voState("done", "✓ Dodano do " + fieldName(cat)); voClose(1600);
