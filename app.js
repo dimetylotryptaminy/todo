@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v87";
+const APP_VERSION = "v88";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -55,6 +55,8 @@ function localStore() {
     setSrs(k, v) { s.srs = { ...s.srs, [k]: v }; lsSet("srs", s.srs); },
     fields: lsGet("fields", null),
     setFields(f) { s.fields = f; lsSet("fields", f); s.onChange(); },
+    // zdjęcia z notatek: bez konta zostają tylko w pamięci tego urządzenia (patrz imgAdd)
+    putImage() {}, async getImage() { return null; },
   };
   return s;
 }
@@ -69,6 +71,7 @@ async function firebaseStore(config) {
   // Wbudowana pamięć Firestore (IndexedDB) na iPhonie zawodziła: zapis szedł na serwer, a ekran telefonu pokazywał stary stan.
   const db = F.initializeFirestore(app, { localCache: F.memoryLocalCache() });
   let unsubUser = null;
+  const imgInFlight = new Set();
   const key = (k) => k + "." + s.uid;
 
   // Synchronizacja jednej kolekcji (zadania: users/{uid}/items, wspólny kalendarz: calendars/{cid}/events):
@@ -154,7 +157,7 @@ async function firebaseStore(config) {
         refreshMeta(); cb();
         if (!user) return;
         subscribe();
-        tasks.flush(); cal.flush();
+        tasks.flush(); cal.flush(); s.flushImages();
         migrateLocal(s);
         afterLogin();
       });
@@ -162,7 +165,7 @@ async function firebaseStore(config) {
         // iPhone zrywa połączenie aplikacji w tle — po powrocie łączymy się od nowa i dosyłamy zaległe zmiany.
         if (document.visibilityState === "visible" && s.uid) { subscribe(); tasks.flush(); cal.flush(); }
       });
-      window.addEventListener("online", () => { if (s.uid) { subscribe(); tasks.flush(); cal.flush(); } });
+      window.addEventListener("online", () => { if (s.uid) { subscribe(); tasks.flush(); cal.flush(); s.flushImages(); } });
     },
     put(id, data) { tasks.put(id, data); },
     del(id) { tasks.del(id); },
@@ -196,6 +199,28 @@ async function firebaseStore(config) {
     async setDaily(date, data) {
       await F.setDoc(F.doc(db, ...dailyPath(), date), data);
       await F.setDoc(F.doc(db, "users", s.uid), { wordHistory: { es: F.arrayUnion(data.es[0]), en: F.arrayUnion(data.en[0]) } }, { merge: true });
+    },
+    // ---------- zdjęcia w notatkach ----------
+    // users/{uid}/images/{id} = {data: "data:image/jpeg;base64,…", created}. Osobna kolekcja, więc nie spowalnia synchronizacji notatek.
+    // Zdjęcie najpierw trafia do pamięci urządzenia („tablica-img”), a na serwer idzie z kolejki — także po powrocie internetu.
+    putImage(id) { const q = lsGet(key("imgpend"), []); if (!q.includes(id)) lsSet(key("imgpend"), [...q, id]); s.flushImages(); },
+    async flushImages() {
+      if (!s.uid) return;
+      for (const id of lsGet(key("imgpend"), [])) {
+        if (imgInFlight.has(id)) continue;
+        imgInFlight.add(id);
+        try {
+          const blob = await imgCacheGet(id);
+          if (blob) await F.setDoc(F.doc(db, "users", s.uid, "images", id), { data: await blobToDataUrl(blob), created: Date.now() });
+          lsSet(key("imgpend"), lsGet(key("imgpend"), []).filter((x) => x !== id));
+        } catch (e) { if (e && (e.code === "permission-denied" || e.code === "invalid-argument")) writeErr(e); }
+        finally { imgInFlight.delete(id); }
+      }
+    },
+    async getImage(id) {
+      if (!s.uid) return null;
+      const d = await F.getDoc(F.doc(db, "users", s.uid, "images", id));
+      return d.exists() ? d.data().data : null;
     },
     fields: null,
     // lista pól (nazwy, kolejność, szerokości) — zapisywana na koncie, wspólna dla wszystkich urządzeń
@@ -2226,9 +2251,80 @@ const folderName = (fid) => (fid === NOFOLDER ? "Bez zagadnienia" : ((store.item
 // kolejność notatek w zagadnieniu: ręczna (przeciąganie); bez ustawionej — nowsze wyżej
 const noteOrd = (n) => (typeof n.order === "number" ? n.order : -(n.created || 0));
 const notesInFolder = (fid) => notesAll().filter((n) => folderOf(n) === fid).sort((a, b) => noteOrd(a) - noteOrd(b));
-const noteTitle = (n) => (n.title || "").trim() || ((n.body || "").trim().split("\n")[0] || "").slice(0, 80) || "Nowa notatka";
+const noteText = (n) => (n.body || "").replace(IMG_RE, "");   // treść bez znaczników zdjęć (do tytułu i wyszukiwania)
+const noteTitle = (n) => (n.title || "").trim() || (noteText(n).trim().split("\n")[0] || "").slice(0, 80) || "Nowa notatka";
 const plNotes = (k) => k + " " + (k === 1 ? "notatka" : (k % 10 >= 2 && k % 10 <= 4 && (k % 100 < 12 || k % 100 > 14)) ? "notatki" : "notatek");
 const notesUI = { folder: lsGet("noteFolder", null), sel: lsGet("noteSel", null), q: "", editing: false, built: null, list: null, ed: null, edFor: null, saveT: null };
+// --- zdjęcia w notatkach ---
+// W treści notatki zdjęcie to osobna linia [[img:ID]]; w widoku pokazujemy w tym miejscu samo zdjęcie.
+const IMG_RE = /\[\[img:([a-z0-9]+)\]\]/gi;
+const IMG_CACHE = "tablica-img";              // kopia zdjęć na urządzeniu (działa bez internetu, zostaje przy aktualizacjach)
+const imgUrls = {};                           // id → adres do <img>
+const imgKey = (id) => new URL("__img/" + id, location.href).href;
+async function imgCacheGet(id) { try { const r = await (await caches.open(IMG_CACHE)).match(imgKey(id)); return r ? await r.blob() : null; } catch { return null; } }
+async function imgCachePut(id, blob) { try { await (await caches.open(IMG_CACHE)).put(imgKey(id), new Response(blob, { headers: { "Content-Type": blob.type || "image/jpeg" } })); } catch {} }
+const blobToDataUrl = (blob) => new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => bad(r.error); r.readAsDataURL(blob); });
+const dataUrlToBlob = (u) => { const [h, b] = u.split(","), bin = atob(b), a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return new Blob([a], { type: (h.match(/data:([^;]+)/) || [])[1] || "image/jpeg" }); };
+async function imgUrl(id) {
+  if (imgUrls[id]) return imgUrls[id];
+  let blob = await imgCacheGet(id);
+  if (!blob && store && store.getImage) { const data = await store.getImage(id); if (data) { blob = dataUrlToBlob(data); imgCachePut(id, blob); } }
+  return blob ? (imgUrls[id] = URL.createObjectURL(blob)) : null;
+}
+// zmniejszenie zdjęcia: JPEG, dłuższy bok do 1600 px, tak by zmieściło się w jednym dokumencie bazy (< 1 MB)
+async function imgShrink(file) {
+  const src = URL.createObjectURL(file);
+  try {
+    const im = await new Promise((ok, bad) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => bad(new Error("Nie udało się otworzyć zdjęcia.")); i.src = src; });
+    let max = 1600, q = 0.82;
+    for (let k = 0; k < 8; k++) {
+      const f = Math.min(1, max / Math.max(im.naturalWidth, im.naturalHeight));
+      const c = document.createElement("canvas"); c.width = Math.max(1, Math.round(im.naturalWidth * f)); c.height = Math.max(1, Math.round(im.naturalHeight * f));
+      const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); g.drawImage(im, 0, 0, c.width, c.height);
+      const blob = await new Promise((ok) => c.toBlob(ok, "image/jpeg", q));
+      if (blob && blob.size < 680000) return blob;   // ~0,9 MB po zakodowaniu do zapisu w bazie
+      max = Math.round(max * 0.8); q = Math.max(0.6, q - 0.05);
+    }
+    throw new Error("Zdjęcie jest za duże.");
+  } finally { URL.revokeObjectURL(src); }
+}
+async function imgAdd(file) {
+  const blob = await imgShrink(file), id = newId();
+  await imgCachePut(id, blob);
+  imgUrls[id] = URL.createObjectURL(blob);
+  store.putImage(id);
+  return id;
+}
+function imgLightbox(src) {
+  const o = document.createElement("div"); o.className = "img-lightbox"; o.setAttribute("role", "dialog"); o.setAttribute("aria-label", "Zdjęcie — stuknij, aby zamknąć");
+  const im = document.createElement("img"); im.src = src; im.alt = ""; o.append(im);
+  const close = () => { o.remove(); document.removeEventListener("keydown", esc); };
+  const esc = (e) => { if (e.key === "Escape") close(); };
+  o.onclick = close; document.addEventListener("keydown", esc);
+  document.body.append(o);
+}
+// treść notatki do widoku: tekst z klikalnymi linkami + zdjęcia; onRemove(i) usuwa i-te zdjęcie z treści
+function noteBodyFrag(text, onRemove) {
+  const frag = document.createDocumentFragment(); let last = 0, i = 0;
+  for (const m of text.matchAll(IMG_RE)) {
+    let before = text.slice(last, m.index); if (before.endsWith("\n")) before = before.slice(0, -1);
+    if (before) frag.append(linkify(before));
+    const k = i++, fig = document.createElement("span"); fig.className = "note-img loading";
+    const im = document.createElement("img"); im.alt = "Zdjęcie"; im.decoding = "async";
+    const x = document.createElement("button"); x.type = "button"; x.className = "note-img-x"; x.textContent = "×";
+    x.title = "Usuń zdjęcie z notatki"; x.setAttribute("aria-label", "Usuń zdjęcie z notatki");
+    x.onclick = (e) => { e.stopPropagation(); if (confirm("Usunąć to zdjęcie z notatki?")) onRemove(k); };
+    im.onclick = (e) => { e.stopPropagation(); if (im.src) imgLightbox(im.src); };
+    fig.append(im, x); frag.append(fig);
+    imgUrl(m[1]).then((u) => {
+      fig.classList.remove("loading");
+      if (u) im.src = u; else { fig.classList.add("missing"); im.remove(); fig.prepend("Zdjęcie niedostępne — sprawdź internet."); }
+    }).catch(() => { fig.classList.remove("loading"); fig.classList.add("missing"); im.remove(); fig.prepend("Zdjęcie niedostępne — sprawdź internet."); });
+    last = m.index + m[0].length; if (text[last] === "\n") last++;
+  }
+  if (last < text.length) frag.append(linkify(text.slice(last)));
+  return frag;
+}
 const URL_RE = /\b(https?:\/\/[^\s<>"]+|www\.[^\s<>"]+\.[^\s<>"]+)/gi;
 function linkify(text) {
   const frag = document.createDocumentFragment(); let last = 0;
@@ -2409,7 +2505,7 @@ function renderRoot() {
   const body = notesUI.root.querySelector(".nf-body");
   const all = notesAll(), q = notesUI.q.trim().toLowerCase();
   if (q) {
-    const hits = all.filter((n) => ((n.title || "") + "\n" + (n.body || "")).toLowerCase().includes(q));
+    const hits = all.filter((n) => ((n.title || "") + "\n" + noteText(n)).toLowerCase().includes(q));
     const ul = document.createElement("ul"); ul.className = "notes-list";
     ul.append(...hits.map((n) => noteItem(n, () => { const f = folderOf(n); notesOpenFolder(f); notesSelect(n.id); }, true)));
     if (!hits.length) { const li = document.createElement("li"); li.className = "notes-empty muted"; li.textContent = "Brak notatek pasujących do „" + notesUI.q.trim() + "”."; ul.append(li); }
@@ -2484,7 +2580,7 @@ function renderFolderNotes() {
   root.querySelector(".nf-title").textContent = folderName(fid);
   const all = notesInFolder(fid);
   const q = notesUI.q.trim().toLowerCase();
-  const shown = q ? all.filter((n) => ((n.title || "") + "\n" + (n.body || "")).toLowerCase().includes(q)) : all;
+  const shown = q ? all.filter((n) => ((n.title || "") + "\n" + noteText(n)).toLowerCase().includes(q)) : all;
   const items = shown.map((n) => noteItem(n, () => notesSelect(n.id, false), false, !q && all.length > 1));
   if (!items.length) {
     const li = document.createElement("li"); li.className = "notes-empty muted";
@@ -2515,7 +2611,34 @@ function renderFolderNotes() {
   title.onblur = () => notesFlush();
   const del = document.createElement("button"); del.type = "button"; del.className = "ghost note-del"; del.textContent = "Usuń";
   del.onclick = () => notesDelete(id);
-  top.append(back, title, del);
+  // zdjęcia: przycisk (aparat / galeria / plik), a w trakcie pisania także wklejanie i przeciąganie
+  const pick = document.createElement("input"); pick.type = "file"; pick.accept = "image/*"; pick.multiple = true; pick.hidden = true;
+  const photo = document.createElement("button"); photo.type = "button"; photo.className = "ghost note-photo"; photo.textContent = "+ Zdjęcie";
+  photo.title = "Dodaj zdjęcie do notatki"; photo.onpointerdown = (e) => e.preventDefault();   // nie zabieraj kursora z pola tekstu
+  photo.onclick = () => pick.click();
+  pick.onchange = () => { const fs = [...pick.files]; pick.value = ""; addPhotos(fs); };
+  top.append(back, title, photo, pick, del);
+  let caret = null;   // gdzie wstawić zdjęcie, jeśli pole tekstu już straciło kursor
+  const addPhotos = async (files) => {
+    files = files.filter((f) => f && /^image\//.test(f.type || "image/"));
+    if (!files.length) return;
+    note(files.length > 1 ? "Dodaję zdjęcia…" : "Dodaję zdjęcie…");
+    for (const f of files) {
+      let imgId;
+      try { imgId = await imgAdd(f); } catch (e) { note((e && e.message) || "Nie udało się dodać zdjęcia.", true); continue; }
+      const ta = box.querySelector(".note-ta");
+      const cur = ta ? ta.value : ((store.items[id] || n).body || "");
+      let pos = ta && document.activeElement === ta ? ta.selectionEnd : caret != null ? caret : cur.length;
+      pos = Math.min(pos, cur.length);
+      const before = cur.slice(0, pos), after = cur.slice(pos);
+      const tok = (before && !before.endsWith("\n") ? "\n" : "") + "[[img:" + imgId + "]]" + (after.startsWith("\n") ? "" : "\n");
+      const body = before + tok + after; caret = before.length + tok.length;
+      if (ta) { ta.value = body; ta.setSelectionRange(caret, caret); ta.dispatchEvent(new Event("input")); }
+      notesFlush(); noteSave(id, { body });
+    }
+    note(files.length > 1 ? "Dodano zdjęcia." : "Dodano zdjęcie.");
+  };
+  const imgFiles = (dt) => (dt ? [...(dt.items || [])].filter((it) => it.kind === "file" && /^image\//.test(it.type)).map((it) => it.getAsFile()) : []);
 
   // data zmiany + przeniesienie do innego katalogu
   const meta = document.createElement("div"); meta.className = "note-date muted";
@@ -2539,10 +2662,12 @@ function renderFolderNotes() {
   const startEdit = () => {
     notesUI.editing = true;
     const ta = document.createElement("textarea"); ta.className = "note-ta"; ta.value = (store.items[id] || n).body || "";
-    ta.placeholder = "Pisz tutaj… możesz wklejać linki, listy, cokolwiek."; ta.setAttribute("aria-label", "Treść notatki");
+    ta.placeholder = "Pisz tutaj… możesz wklejać linki, listy i zdjęcia."; ta.setAttribute("aria-label", "Treść notatki");
+    ta.onpaste = (e) => { const fs = imgFiles(e.clipboardData); if (fs.length) { e.preventDefault(); addPhotos(fs); } };
     const fit = () => { ta.style.height = "auto"; ta.style.height = Math.max(ta.scrollHeight + 2, 220) + "px"; };
     ta.oninput = () => { fit(); notesLater(() => noteSave(id, { body: ta.value })); };
     ta.onblur = () => {
+      caret = ta.selectionEnd;
       notesFlush(); notesUI.editing = false;
       setTimeout(() => { if (notesUI.sel === id && !box.contains(document.activeElement)) showView(); }, 0);
     };
@@ -2553,11 +2678,18 @@ function renderFolderNotes() {
     const cur = store.items[id] || n;
     const v = document.createElement("div"); v.className = "note-view"; v.tabIndex = 0; v.setAttribute("role", "button");
     v.setAttribute("aria-label", "Treść notatki — stuknij, aby edytować");
-    if ((cur.body || "").trim()) v.append(linkify(cur.body)); else { v.classList.add("empty"); v.textContent = "Stuknij, aby pisać…"; }
-    v.onclick = (e) => { if (e.target.closest("a") || (getSelection() + "")) return; startEdit(); };
+    const removeImg = (k) => {
+      let i = 0; const b = ((store.items[id] || n).body || "").replace(/\n?\[\[img:[a-z0-9]+\]\]\n?/gi, (m) => (i++ === k ? (m.startsWith("\n") && m.endsWith("\n") ? "\n" : "") : m));
+      caret = null; notesFlush(); noteSave(id, { body: b });
+    };
+    if ((cur.body || "").trim()) v.append(noteBodyFrag(cur.body, removeImg)); else { v.classList.add("empty"); v.textContent = "Stuknij, aby pisać…"; }
+    v.onclick = (e) => { if (e.target.closest("a, .note-img") || (getSelection() + "")) return; caret = null; startEdit(); };
     v.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); startEdit(); } };
     box.replaceChildren(v);
   };
+  box.ondragover = (e) => { if ([...(e.dataTransfer.items || [])].some((it) => it.kind === "file")) { e.preventDefault(); box.classList.add("drop"); } };
+  box.ondragleave = () => box.classList.remove("drop");
+  box.ondrop = (e) => { box.classList.remove("drop"); const fs = [...(e.dataTransfer.files || [])].filter((f) => /^image\//.test(f.type)); if (fs.length) { e.preventDefault(); addPhotos(fs); } };
   if (notesUI.editing) startEdit(); else showView();
 
   ed.replaceChildren(top, meta, box);
