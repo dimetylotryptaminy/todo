@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v88";
+const APP_VERSION = "v89";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -2303,18 +2303,23 @@ function imgLightbox(src) {
   o.onclick = close; document.addEventListener("keydown", esc);
   document.body.append(o);
 }
-// treść notatki do widoku: tekst z klikalnymi linkami + zdjęcia; onRemove(i) usuwa i-te zdjęcie z treści
-function noteBodyFrag(text, onRemove) {
+// treść notatki: tekst + zdjęcia. W widoku linki są klikalne; w edytorze (edit) tekst jest zwykły, a zdjęcia to
+// nieedytowalne bloki z data-img. onRemove(i, element) usuwa i-te zdjęcie.
+function noteBodyFrag(text, onRemove, edit = false) {
   const frag = document.createDocumentFragment(); let last = 0, i = 0;
+  const txt = (t) => (edit ? document.createTextNode(t) : linkify(t));
   for (const m of text.matchAll(IMG_RE)) {
     let before = text.slice(last, m.index); if (before.endsWith("\n")) before = before.slice(0, -1);
-    if (before) frag.append(linkify(before));
+    if (before) frag.append(txt(before));
     const k = i++, fig = document.createElement("span"); fig.className = "note-img loading";
+    fig.dataset.img = m[1]; if (edit) fig.contentEditable = "false";
     const im = document.createElement("img"); im.alt = "Zdjęcie"; im.decoding = "async";
     const x = document.createElement("button"); x.type = "button"; x.className = "note-img-x"; x.textContent = "×";
     x.title = "Usuń zdjęcie z notatki"; x.setAttribute("aria-label", "Usuń zdjęcie z notatki");
-    x.onclick = (e) => { e.stopPropagation(); if (confirm("Usunąć to zdjęcie z notatki?")) onRemove(k); };
-    im.onclick = (e) => { e.stopPropagation(); if (im.src) imgLightbox(im.src); };
+    x.onmousedown = (e) => e.preventDefault();
+    x.onclick = (e) => { e.preventDefault(); e.stopPropagation(); if (confirm("Usunąć to zdjęcie z notatki?")) onRemove(k, fig); };
+    im.onmousedown = (e) => e.preventDefault();
+    im.onclick = (e) => { e.preventDefault(); e.stopPropagation(); if (im.src) imgLightbox(im.src); };
     fig.append(im, x); frag.append(fig);
     imgUrl(m[1]).then((u) => {
       fig.classList.remove("loading");
@@ -2322,9 +2327,26 @@ function noteBodyFrag(text, onRemove) {
     }).catch(() => { fig.classList.remove("loading"); fig.classList.add("missing"); im.remove(); fig.prepend("Zdjęcie niedostępne — sprawdź internet."); });
     last = m.index + m[0].length; if (text[last] === "\n") last++;
   }
-  if (last < text.length) frag.append(linkify(text.slice(last)));
+  if (last < text.length) frag.append(txt(text.slice(last)));
   return frag;
 }
+// zawartość edytora (lub jej fragmentu) z powrotem na tekst notatki ze znacznikami [[img:ID]]
+function edText(root, trim = true) {
+  let out = "";
+  const walk = (node) => {
+    for (const c of node.childNodes) {
+      if (c.nodeType === 3) out += c.data;
+      else if (c.nodeType !== 1) continue;
+      else if (c.dataset && c.dataset.img) out += (out ? "\n" : "") + "[[img:" + c.dataset.img + "]]\n";
+      else if (c.tagName === "BR") out += "\n";
+      else if (/^(DIV|P)$/.test(c.tagName)) { if (out && !out.endsWith("\n")) out += "\n"; walk(c); }
+      else walk(c);
+    }
+  };
+  walk(root);
+  return trim ? out.replace(/\n+$/, (m) => (/\]\]$/.test(out.slice(0, -m.length)) ? "\n" : "")) : out;
+}
+const PLAIN_EDIT = (() => { try { const d = document.createElement("div"); d.contentEditable = "plaintext-only"; return d.contentEditable === "plaintext-only"; } catch { return false; } })();
 const URL_RE = /\b(https?:\/\/[^\s<>"]+|www\.[^\s<>"]+\.[^\s<>"]+)/gi;
 function linkify(text) {
   const frag = document.createDocumentFragment(); let last = 0;
@@ -2626,15 +2648,25 @@ function renderFolderNotes() {
     for (const f of files) {
       let imgId;
       try { imgId = await imgAdd(f); } catch (e) { note((e && e.message) || "Nie udało się dodać zdjęcia.", true); continue; }
-      const ta = box.querySelector(".note-ta");
-      const cur = ta ? ta.value : ((store.items[id] || n).body || "");
-      let pos = ta && document.activeElement === ta ? ta.selectionEnd : caret != null ? caret : cur.length;
-      pos = Math.min(pos, cur.length);
+      const ta = box.querySelector(".note-ta"), sel = getSelection();
+      if (ta && sel.rangeCount && ta.contains(sel.getRangeAt(0).endContainer)) {
+        // edytor otwarty → zdjęcie od razu w miejscu kursora, kursor za zdjęciem
+        const r = sel.getRangeAt(0); r.collapse(false);
+        const fig = noteBodyFrag("[[img:" + imgId + "]]", edRemove, true).firstChild;
+        r.insertNode(fig);
+        let after = fig.nextSibling;
+        if (!after || after.nodeType !== 3) { after = document.createTextNode(""); fig.after(after); }
+        r.setStart(after, 0); r.collapse(true); sel.removeAllRanges(); sel.addRange(r);
+        caret = null; notesFlush(); noteSave(id, { body: edText(ta) });
+        continue;
+      }
+      const cur = ta ? edText(ta) : ((store.items[id] || n).body || "");
+      const pos = Math.min(caret != null ? caret : cur.length, cur.length);
       const before = cur.slice(0, pos), after = cur.slice(pos);
       const tok = (before && !before.endsWith("\n") ? "\n" : "") + "[[img:" + imgId + "]]" + (after.startsWith("\n") ? "" : "\n");
       const body = before + tok + after; caret = before.length + tok.length;
-      if (ta) { ta.value = body; ta.setSelectionRange(caret, caret); ta.dispatchEvent(new Event("input")); }
       notesFlush(); noteSave(id, { body });
+      if (ta) { ta.replaceChildren(noteBodyFrag(body, edRemove, true)); }
     }
     note(files.length > 1 ? "Dodano zdjęcia." : "Dodano zdjęcie.");
   };
@@ -2659,20 +2691,42 @@ function renderFolderNotes() {
   meta.append(when, mv);
 
   const box = document.createElement("div"); box.className = "note-body";
+  // usunięcie zdjęcia w edytorze (krzyżyk) — znika z treści od razu
+  function edRemove(k, fig) {
+    const ta = box.querySelector(".note-ta"); if (!ta || !ta.contains(fig)) return;
+    // tekst przed i za zdjęciem zostaje w osobnych liniach
+    const pre = fig.previousSibling, post = fig.nextSibling;
+    const joins = pre && post && !(pre.nodeType === 3 && pre.data.endsWith("\n")) && !(post.nodeType === 3 && post.data.startsWith("\n"));
+    if (joins && (pre.nodeType === 3 ? pre.data : "1") && (post.nodeType === 3 ? post.data : "1")) fig.replaceWith("\n"); else fig.remove();
+    caret = null; notesFlush(); noteSave(id, { body: edText(ta) });
+  }
+  // Edytor pokazuje tekst i zdjęcia tak jak widok (zdjęcia nie są zamieniane na znaczniki).
   const startEdit = () => {
     notesUI.editing = true;
-    const ta = document.createElement("textarea"); ta.className = "note-ta"; ta.value = (store.items[id] || n).body || "";
-    ta.placeholder = "Pisz tutaj… możesz wklejać linki, listy i zdjęcia."; ta.setAttribute("aria-label", "Treść notatki");
-    ta.onpaste = (e) => { const fs = imgFiles(e.clipboardData); if (fs.length) { e.preventDefault(); addPhotos(fs); } };
-    const fit = () => { ta.style.height = "auto"; ta.style.height = Math.max(ta.scrollHeight + 2, 220) + "px"; };
-    ta.oninput = () => { fit(); notesLater(() => noteSave(id, { body: ta.value })); };
+    const ta = document.createElement("div"); ta.className = "note-ta";
+    ta.contentEditable = PLAIN_EDIT ? "plaintext-only" : "true";
+    ta.setAttribute("role", "textbox"); ta.setAttribute("aria-multiline", "true"); ta.setAttribute("aria-label", "Treść notatki");
+    ta.dataset.placeholder = "Pisz tutaj… możesz wklejać linki, listy i zdjęcia.";
+    ta.spellcheck = true;
+    ta.append(noteBodyFrag((store.items[id] || n).body || "", edRemove, true));
+    const empty = () => ta.classList.toggle("is-empty", !ta.textContent && !ta.querySelector("[data-img]"));
+    ta.onpaste = (e) => {
+      const fs = imgFiles(e.clipboardData); if (fs.length) { e.preventDefault(); addPhotos(fs); return; }
+      if (!PLAIN_EDIT) { e.preventDefault(); document.execCommand("insertText", false, e.clipboardData.getData("text/plain")); }
+    };
+    ta.oninput = () => { empty(); notesLater(() => noteSave(id, { body: edText(ta) })); };
     ta.onblur = () => {
-      caret = ta.selectionEnd;
+      const s2 = getSelection();
+      if (s2.rangeCount && ta.contains(s2.getRangeAt(0).endContainer)) {
+        const r = document.createRange(); r.selectNodeContents(ta); r.setEnd(s2.getRangeAt(0).endContainer, s2.getRangeAt(0).endOffset);
+        caret = edText(r.cloneContents(), false).length;
+      }
       notesFlush(); notesUI.editing = false;
       setTimeout(() => { if (notesUI.sel === id && !box.contains(document.activeElement)) showView(); }, 0);
     };
-    box.replaceChildren(ta); fit(); ta.focus({ preventScroll: true });
-    ta.setSelectionRange(ta.value.length, ta.value.length);
+    box.replaceChildren(ta); empty(); ta.focus({ preventScroll: true });
+    const r = document.createRange(); r.selectNodeContents(ta); r.collapse(false);
+    const s1 = getSelection(); s1.removeAllRanges(); s1.addRange(r);
   };
   const showView = () => {
     const cur = store.items[id] || n;

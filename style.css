@@ -857,6 +857,9 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none 
 .img-lightbox { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, .88); display: grid; place-items: center; padding: 16px; cursor: zoom-out; }
 .img-lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; }
 .note-ta { display: block; width: 100%; min-height: 220px; resize: none; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--accent); background: var(--paper); }
+.note-ta.is-empty::before { content: attr(data-placeholder); color: var(--done); pointer-events: none; }
+div.note-ta { cursor: text; }
+.note-ta .note-img { user-select: none; -webkit-user-select: none; }
 .note-ta:focus { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
 @media (prefers-color-scheme: dark) { .note-view a { color: #7fb0f5; } .note-item.sel { background: color-mix(in srgb, #7fb0f5 18%, var(--paper)); } }
 @media (max-width: 640px) {
