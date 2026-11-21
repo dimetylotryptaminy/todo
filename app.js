@@ -2,7 +2,7 @@ import { parse, norm, catOf } from "./parser.js";
 import { ES_WORDS, EN_WORDS } from "./words.js";
 
 const DEFAULT_MOTTO = "Less noise. More mining.";
-const APP_VERSION = "v89";
+const APP_VERSION = "v90";
 // Pozycja słowa zapisującego, jeśli jest ostatnim słowem tekstu („… zapisz”, „… Zapisz.”, dawne „… koniec”), inaczej -1.
 // Tolerancja na błędy dyktowania: „Zapisz.”, „zapisze”, „zapiszę”, „Konieć”, „konie c”.
 function trailingEndWord(text) {
@@ -2332,19 +2332,32 @@ function noteBodyFrag(text, onRemove, edit = false) {
 }
 // zawartość edytora (lub jej fragmentu) z powrotem na tekst notatki ze znacznikami [[img:ID]]
 function edText(root, trim = true) {
-  let out = "";
+  let out = "", afterImg = false;   // zdjęcie tuż po zdjęciu: bez dodatkowej pustej linii
   const walk = (node) => {
     for (const c of node.childNodes) {
-      if (c.nodeType === 3) out += c.data;
+      if (c.nodeType === 3) { if (c.data) { out += c.data; afterImg = false; } }
       else if (c.nodeType !== 1) continue;
-      else if (c.dataset && c.dataset.img) out += (out ? "\n" : "") + "[[img:" + c.dataset.img + "]]\n";
-      else if (c.tagName === "BR") out += "\n";
+      else if (c.dataset && c.dataset.img) { out += (out && !afterImg ? "\n" : "") + "[[img:" + c.dataset.img + "]]\n"; afterImg = true; }
+      else if (c.tagName === "BR") { if (!c.classList.contains("ed-gap")) { out += "\n"; afterImg = false; } }
       else if (/^(DIV|P)$/.test(c.tagName)) { if (out && !out.endsWith("\n")) out += "\n"; walk(c); }
       else walk(c);
     }
   };
   walk(root);
   return trim ? out.replace(/\n+$/, (m) => (/\]\]$/.test(out.slice(0, -m.length)) ? "\n" : "")) : out;
+}
+// w edytorze za zdjęciem, po którym nie ma tekstu (koniec notatki albo kolejne zdjęcie), zostawiamy pustą linię,
+// żeby dało się tam postawić kursor i pisać dalej lub wstawić następne zdjęcie (nie trafia do zapisanej treści)
+function edGaps(ta) {
+  for (const fig of ta.querySelectorAll("[data-img]")) {
+    let nx = fig.nextSibling;
+    while (nx && nx.nodeType === 3 && !nx.data) nx = nx.nextSibling;
+    if (!nx || (nx.nodeType === 1 && nx.dataset && nx.dataset.img)) { const br = document.createElement("br"); br.className = "ed-gap"; fig.after(br); }
+  }
+  for (const br of ta.querySelectorAll("br.ed-gap")) {   // zbędne, gdy za zdjęciem jest już tekst
+    let pv = br.previousSibling; while (pv && pv.nodeType === 3 && !pv.data) pv = pv.previousSibling;
+    if (!(pv && pv.nodeType === 1 && pv.dataset && pv.dataset.img)) br.classList.remove("ed-gap");
+  }
 }
 const PLAIN_EDIT = (() => { try { const d = document.createElement("div"); d.contentEditable = "plaintext-only"; return d.contentEditable === "plaintext-only"; } catch { return false; } })();
 const URL_RE = /\b(https?:\/\/[^\s<>"]+|www\.[^\s<>"]+\.[^\s<>"]+)/gi;
@@ -2653,10 +2666,10 @@ function renderFolderNotes() {
         // edytor otwarty → zdjęcie od razu w miejscu kursora, kursor za zdjęciem
         const r = sel.getRangeAt(0); r.collapse(false);
         const fig = noteBodyFrag("[[img:" + imgId + "]]", edRemove, true).firstChild;
-        r.insertNode(fig);
-        let after = fig.nextSibling;
-        if (!after || after.nodeType !== 3) { after = document.createTextNode(""); fig.after(after); }
-        r.setStart(after, 0); r.collapse(true); sel.removeAllRanges(); sel.addRange(r);
+        r.insertNode(fig); edGaps(ta);
+        const after = fig.nextSibling;
+        if (after && after.nodeType === 3) r.setStart(after, 0); else r.setStartAfter(fig);
+        r.collapse(true); sel.removeAllRanges(); sel.addRange(r);
         caret = null; notesFlush(); noteSave(id, { body: edText(ta) });
         continue;
       }
@@ -2666,7 +2679,7 @@ function renderFolderNotes() {
       const tok = (before && !before.endsWith("\n") ? "\n" : "") + "[[img:" + imgId + "]]" + (after.startsWith("\n") ? "" : "\n");
       const body = before + tok + after; caret = before.length + tok.length;
       notesFlush(); noteSave(id, { body });
-      if (ta) { ta.replaceChildren(noteBodyFrag(body, edRemove, true)); }
+      if (ta) { ta.replaceChildren(noteBodyFrag(body, edRemove, true)); edGaps(ta); }
     }
     note(files.length > 1 ? "Dodano zdjęcia." : "Dodano zdjęcie.");
   };
@@ -2698,6 +2711,7 @@ function renderFolderNotes() {
     const pre = fig.previousSibling, post = fig.nextSibling;
     const joins = pre && post && !(pre.nodeType === 3 && pre.data.endsWith("\n")) && !(post.nodeType === 3 && post.data.startsWith("\n"));
     if (joins && (pre.nodeType === 3 ? pre.data : "1") && (post.nodeType === 3 ? post.data : "1")) fig.replaceWith("\n"); else fig.remove();
+    edGaps(ta);
     caret = null; notesFlush(); noteSave(id, { body: edText(ta) });
   }
   // Edytor pokazuje tekst i zdjęcia tak jak widok (zdjęcia nie są zamieniane na znaczniki).
@@ -2708,13 +2722,13 @@ function renderFolderNotes() {
     ta.setAttribute("role", "textbox"); ta.setAttribute("aria-multiline", "true"); ta.setAttribute("aria-label", "Treść notatki");
     ta.dataset.placeholder = "Pisz tutaj… możesz wklejać linki, listy i zdjęcia.";
     ta.spellcheck = true;
-    ta.append(noteBodyFrag((store.items[id] || n).body || "", edRemove, true));
+    ta.append(noteBodyFrag((store.items[id] || n).body || "", edRemove, true)); edGaps(ta);
     const empty = () => ta.classList.toggle("is-empty", !ta.textContent && !ta.querySelector("[data-img]"));
     ta.onpaste = (e) => {
       const fs = imgFiles(e.clipboardData); if (fs.length) { e.preventDefault(); addPhotos(fs); return; }
       if (!PLAIN_EDIT) { e.preventDefault(); document.execCommand("insertText", false, e.clipboardData.getData("text/plain")); }
     };
-    ta.oninput = () => { empty(); notesLater(() => noteSave(id, { body: edText(ta) })); };
+    ta.oninput = () => { empty(); edGaps(ta); notesLater(() => noteSave(id, { body: edText(ta) })); };
     ta.onblur = () => {
       const s2 = getSelection();
       if (s2.rangeCount && ta.contains(s2.getRangeAt(0).endContainer)) {
